@@ -50,8 +50,9 @@ function displayFlash(): void {
 // -----------------------------------------------
 //  Currency Formatting
 // -----------------------------------------------
-function formatCurrency(float $amount): string {
-    return '₱ ' . number_format($amount, 2);
+function formatCurrency($amount): string {
+    $val = (float)($amount ?? 0);
+    return '₱ ' . number_format($val, 2);
 }
 
 // -----------------------------------------------
@@ -65,15 +66,28 @@ function generateBookingRef(): string {
     return 'BK-' . $year . '-' . str_pad($count, 5, '0', STR_PAD_LEFT);
 }
 
+function getBookingRef(array $b): string {
+    if (!empty($b['booking_reference'])) {
+        return $b['booking_reference'];
+    }
+    $id = $b['booking_id'] ?? $b['id'] ?? 0;
+    return 'BK-' . date('Y') . '-' . str_pad($id, 5, '0', STR_PAD_LEFT);
+}
+
 // -----------------------------------------------
 //  Audit Logging
 // -----------------------------------------------
 function logAudit(int $userId, string $action, string $description, string $table = ''): void {
     try {
         $db   = getDB();
-        $ip   = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-        $stmt = $db->prepare("INSERT INTO audit_logs (user_id, action, description, table_affected, ip_address) VALUES (?, ?, ?, ?, ?)");
-        $stmt->execute([$userId, $action, $description, $table, $ip]);
+        $act  = $action . ($description ? ": $description" : "");
+        if ($userId > 0) {
+            $stmt = $db->prepare("INSERT INTO audit_logs (user_id, action, table_affected) VALUES (?, ?, ?)");
+            $stmt->execute([$userId, $act, $table]);
+        } else {
+            $stmt = $db->prepare("INSERT INTO audit_logs (action, table_affected) VALUES (?, ?)");
+            $stmt->execute([$act, $table]);
+        }
     } catch (Exception $e) {
         // Silent fail — audit logging should never break the app
     }
@@ -82,7 +96,8 @@ function logAudit(int $userId, string $action, string $description, string $tabl
 // -----------------------------------------------
 //  Status Badge HTML
 // -----------------------------------------------
-function statusBadge(string $status): string {
+function statusBadge(?string $status): string {
+    $statusStr = $status ?? 'unknown';
     $map = [
         'active'      => 'success',
         'available'   => 'success',
@@ -97,8 +112,8 @@ function statusBadge(string $status): string {
         'maintenance' => 'warning',
         'banned'      => 'danger',
     ];
-    $class = $map[strtolower($status)] ?? 'secondary';
-    return "<span class=\"badge badge-{$class}\">" . ucfirst($status) . "</span>";
+    $class = $map[strtolower($statusStr)] ?? 'secondary';
+    return "<span class=\"badge badge-{$class}\">" . ucfirst($statusStr) . "</span>";
 }
 
 // -----------------------------------------------
@@ -132,7 +147,7 @@ function paginate(int $total, int $perPage, int $currentPage): array {
 // -----------------------------------------------
 function getActivePackages(): array {
     $db   = getDB();
-    $stmt = $db->query("SELECT * FROM packages WHERE status = 'active' ORDER BY price ASC");
+    $stmt = $db->query("SELECT package_id AS id, package_id, package_name AS name, package_name, base_price AS price, base_price, description, status FROM packages WHERE status = 'active' ORDER BY base_price ASC");
     return $stmt->fetchAll();
 }
 
@@ -142,14 +157,15 @@ function getActivePackages(): array {
 function getBookingById(int $id): ?array {
     $db   = getDB();
     $stmt = $db->prepare("
-        SELECT b.*, u.name AS customer_name, u.email AS customer_email, u.phone AS customer_phone,
-               p.name AS package_name, p.price AS package_price,
-               v.name AS venue_name, v.address AS venue_address
+        SELECT b.*, b.booking_id AS id, u.name AS customer_name, u.email AS customer_email, u.contact_no AS customer_phone,
+               p.package_name AS package_name, p.base_price AS package_price,
+               v.venue_name AS venue_name, v.location AS venue_address,
+               (SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE booking_id = b.booking_id) AS amount_paid
         FROM bookings b
-        JOIN users u ON b.customer_id = u.id
-        JOIN packages p ON b.package_id = p.id
-        LEFT JOIN venues v ON b.venue_id = v.id
-        WHERE b.id = ?
+        JOIN users u ON b.customer_id = u.user_id
+        JOIN packages p ON b.package_id = p.package_id
+        LEFT JOIN venues v ON b.venue_id = v.venue_id
+        WHERE b.booking_id = ?
     ");
     $stmt->execute([$id]);
     $row = $stmt->fetch();
@@ -161,7 +177,11 @@ function getBookingById(int $id): ?array {
 // -----------------------------------------------
 function updateBookingPaymentStatus(int $bookingId): void {
     $db   = getDB();
-    $stmt = $db->prepare("SELECT total_amount, amount_paid FROM bookings WHERE id = ?");
+    $stmt = $db->prepare("
+        SELECT total_amount,
+               (SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE booking_id = b.booking_id) AS amount_paid
+        FROM bookings b WHERE b.booking_id = ?
+    ");
     $stmt->execute([$bookingId]);
     $booking = $stmt->fetch();
     if (!$booking) return;
@@ -170,14 +190,14 @@ function updateBookingPaymentStatus(int $bookingId): void {
     $paid  = (float)$booking['amount_paid'];
 
     if ($paid <= 0) {
-        $status = 'unpaid';
+        $status = 'Pending';
     } elseif ($paid >= $total) {
-        $status = 'paid';
+        $status = 'Paid';
     } else {
-        $status = 'partial';
+        $status = 'Confirmed';
     }
 
-    $update = $db->prepare("UPDATE bookings SET payment_status = ? WHERE id = ?");
+    $update = $db->prepare("UPDATE bookings SET status = ? WHERE booking_id = ?");
     $update->execute([$status, $bookingId]);
 }
 
@@ -192,26 +212,26 @@ function getDashboardStats(string $role, int $userId = 0): array {
         $stats['total_users']     = $db->query("SELECT COUNT(*) FROM users WHERE role = 'customer'")->fetchColumn();
         $stats['total_packages']  = $db->query("SELECT COUNT(*) FROM packages WHERE status = 'active'")->fetchColumn();
         $stats['total_bookings']  = $db->query("SELECT COUNT(*) FROM bookings")->fetchColumn();
-        $stats['total_revenue']   = $db->query("SELECT COALESCE(SUM(amount_paid),0) FROM bookings")->fetchColumn();
-        $stats['pending_bookings']= $db->query("SELECT COUNT(*) FROM bookings WHERE status = 'pending'")->fetchColumn();
-        $stats['total_venues']    = $db->query("SELECT COUNT(*) FROM venues WHERE status = 'available'")->fetchColumn();
+        $stats['total_revenue']   = $db->query("SELECT COALESCE(SUM(amount_paid),0) FROM payments")->fetchColumn();
+        $stats['pending_bookings']= $db->query("SELECT COUNT(*) FROM bookings WHERE status = 'Pending'")->fetchColumn();
+        $stats['total_venues']    = $db->query("SELECT COUNT(*) FROM venues WHERE availability_status = 'available'")->fetchColumn();
     } elseif ($role === 'cashier') {
-        $stats['pending_payments']= $db->query("SELECT COUNT(*) FROM bookings WHERE payment_status != 'paid' AND status != 'cancelled'")->fetchColumn();
+        $stats['pending_payments']= $db->query("SELECT COUNT(*) FROM bookings WHERE status NOT IN ('Paid','Cancelled')")->fetchColumn();
         $stats['total_collected'] = $db->prepare("SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE cashier_id = ?");
         $stats['total_collected']->execute([$userId]);
         $stats['total_collected'] = $stats['total_collected']->fetchColumn();
         $stats['today_payments']  = $db->prepare("SELECT COUNT(*) FROM payments WHERE cashier_id = ? AND DATE(payment_date) = CURDATE()");
         $stats['today_payments']->execute([$userId]);
         $stats['today_payments']  = $stats['today_payments']->fetchColumn();
-        $stats['confirmed_bookings'] = $db->query("SELECT COUNT(*) FROM bookings WHERE status = 'confirmed'")->fetchColumn();
+        $stats['confirmed_bookings'] = $db->query("SELECT COUNT(*) FROM bookings WHERE status = 'Confirmed'")->fetchColumn();
     } elseif ($role === 'customer') {
         $s = $db->prepare("SELECT COUNT(*) FROM bookings WHERE customer_id = ?"); $s->execute([$userId]);
         $stats['my_bookings'] = $s->fetchColumn();
-        $s = $db->prepare("SELECT COUNT(*) FROM bookings WHERE customer_id = ? AND status = 'pending'"); $s->execute([$userId]);
+        $s = $db->prepare("SELECT COUNT(*) FROM bookings WHERE customer_id = ? AND status = 'Pending'"); $s->execute([$userId]);
         $stats['pending'] = $s->fetchColumn();
-        $s = $db->prepare("SELECT COUNT(*) FROM bookings WHERE customer_id = ? AND status = 'confirmed'"); $s->execute([$userId]);
+        $s = $db->prepare("SELECT COUNT(*) FROM bookings WHERE customer_id = ? AND status = 'Confirmed'"); $s->execute([$userId]);
         $stats['confirmed'] = $s->fetchColumn();
-        $s = $db->prepare("SELECT COALESCE(SUM(amount_paid),0) FROM bookings WHERE customer_id = ?"); $s->execute([$userId]);
+        $s = $db->prepare("SELECT COALESCE(SUM(p.amount_paid),0) FROM payments p JOIN bookings b ON p.booking_id = b.booking_id WHERE b.customer_id = ?"); $s->execute([$userId]);
         $stats['total_paid'] = $s->fetchColumn();
     }
 

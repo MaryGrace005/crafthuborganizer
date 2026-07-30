@@ -9,25 +9,27 @@ $db    = getDB();
 
 // Bookings needing payment
 $stmt = $db->query("
-    SELECT b.*, u.name AS customer_name, p.name AS package_name
+    SELECT b.*, b.booking_id AS id, u.name AS customer_name, p.package_name AS package_name,
+           (SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE booking_id = b.booking_id) AS calc_paid
     FROM bookings b
-    JOIN users u ON b.customer_id = u.id
-    JOIN packages p ON b.package_id = p.id
-    WHERE b.payment_status != 'paid' AND b.status != 'cancelled'
+    JOIN users u ON b.customer_id = u.user_id
+    JOIN packages p ON b.package_id = p.package_id
+    WHERE b.status NOT IN ('Paid','Cancelled')
     ORDER BY b.created_at DESC LIMIT 8
 ");
 $pendingPayments = $stmt->fetchAll();
 
 // Today's payments
 $todayStmt = $db->prepare("
-    SELECT py.*, b.booking_reference, u.name AS customer_name
+    SELECT py.*, py.payment_id AS id, u.name AS customer_name
     FROM payments py
-    JOIN bookings b ON py.booking_id = b.id
-    JOIN users u ON b.customer_id = u.id
+    JOIN bookings b ON py.booking_id = b.booking_id
+    JOIN users u ON b.customer_id = u.user_id
     WHERE py.cashier_id = ? AND DATE(py.payment_date) = CURDATE()
     ORDER BY py.payment_date DESC
 ");
-$todayStmt->execute([$user['id']]);
+$userId = $user['user_id'] ?? $user['id'];
+$todayStmt->execute([$userId]);
 $todayPayments = $todayStmt->fetchAll();
 ?>
 
@@ -95,15 +97,25 @@ $todayPayments = $todayStmt->fetchAll();
             </div>
         <?php else: ?>
             <div style="display:flex;flex-direction:column;gap:10px;">
-                <?php foreach ($pendingPayments as $b): ?>
+                <?php foreach ($pendingPayments as $b): 
+                    $totAmt  = (float)($b['total_amount'] ?? 0);
+                    $amtPaid = (float)($b['calc_paid'] > 0 ? $b['calc_paid'] : ($b['amount_paid'] ?? 0));
+                    $balance = max(0.0, $totAmt - $amtPaid);
+                ?>
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:var(--bg-card);border-radius:var(--radius-sm);border:1px solid var(--border-color);">
                     <div>
                         <div style="font-size:0.88rem;font-weight:600;"><?= htmlspecialchars($b['customer_name']) ?></div>
-                        <div style="font-size:0.78rem;color:var(--text-secondary);"><?= $b['booking_reference'] ?> • <?= htmlspecialchars($b['package_name']) ?></div>
+                        <div style="font-size:0.78rem;color:var(--text-secondary);"><?= htmlspecialchars(getBookingRef($b)) ?> • <?= htmlspecialchars($b['package_name']) ?></div>
+                        <div style="font-size:0.75rem;margin-top:2px;">
+                            <span style="color:#27ae60;font-weight:600;"><?= formatCurrency($amtPaid) ?> Paid</span>
+                            <span style="color:var(--text-muted);"> / <?= formatCurrency($totAmt) ?></span>
+                        </div>
                     </div>
-                    <div style="text-align:right;">
-                        <div style="color:var(--accent-gold);font-weight:700;font-size:0.9rem;"><?= formatCurrency($b['total_amount'] - $b['amount_paid']) ?></div>
-                        <?= statusBadge($b['payment_status']) ?>
+                    <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+                        <div style="color:var(--accent-red);font-weight:700;font-size:0.9rem;"><?= formatCurrency($balance) ?> Due</div>
+                        <a href="<?= APP_URL ?>/cashier/process_payment.php?id=<?= $b['id'] ?>" class="btn btn-success btn-sm">
+                            <i class="fa-solid fa-money-bill"></i> Pay
+                        </a>
                     </div>
                 </div>
                 <?php endforeach; ?>
@@ -127,7 +139,7 @@ $todayPayments = $todayStmt->fetchAll();
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:rgba(39,174,96,0.05);border-radius:var(--radius-sm);border:1px solid rgba(39,174,96,0.15);">
                     <div>
                         <div style="font-size:0.88rem;font-weight:600;"><?= htmlspecialchars($py['customer_name']) ?></div>
-                        <div style="font-size:0.78rem;color:var(--text-secondary);"><?= $py['booking_reference'] ?> • <?= ucwords(str_replace('_',' ',$py['payment_method'])) ?></div>
+                        <div style="font-size:0.78rem;color:var(--text-secondary);"><?= htmlspecialchars(getBookingRef($py)) ?> • <?= ucwords(str_replace('_',' ', $py['payment_method'] ?? 'cash')) ?></div>
                     </div>
                     <div style="color:#27ae60;font-weight:700;"><?= formatCurrency($py['amount_paid']) ?></div>
                 </div>

@@ -12,8 +12,9 @@ if (!$bookingId) {
     redirect(APP_URL . '/customer/bookings.php');
 }
 
-$stmt = $db->prepare("SELECT b.*, p.name AS package_name FROM bookings b JOIN packages p ON b.package_id = p.id WHERE b.id = ? AND b.customer_id = ?");
-$stmt->execute([$bookingId, $user['id']]);
+$stmt = $db->prepare("SELECT b.*, b.booking_id AS id, p.package_name AS package_name FROM bookings b JOIN packages p ON b.package_id = p.package_id WHERE b.booking_id = ? AND b.customer_id = ?");
+$userId = $user['user_id'] ?? $user['id'];
+$stmt->execute([$bookingId, $userId]);
 $booking = $stmt->fetch();
 
 if (!$booking) {
@@ -21,17 +22,17 @@ if (!$booking) {
     redirect(APP_URL . '/customer/bookings.php');
 }
 
-if ($booking['status'] !== 'pending') {
+if (strtolower($booking['status']) !== 'pending') {
     setFlash('error', 'Only pending bookings can be cancelled.');
     redirect(APP_URL . '/customer/bookings.php');
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $reason = sanitize($_POST['reason'] ?? '');
-    $upd    = $db->prepare("UPDATE bookings SET status = 'cancelled', cancelled_reason = ? WHERE id = ?");
-    $upd->execute([$reason, $bookingId]);
-    logAudit($user['id'], 'CANCEL_BOOKING', "Cancelled booking #{$bookingId}: {$booking['booking_reference']}", 'bookings');
-    setFlash('success', 'Booking ' . $booking['booking_reference'] . ' has been cancelled.');
+    $upd    = $db->prepare("UPDATE bookings SET status = 'Cancelled' WHERE booking_id = ?");
+    $upd->execute([$bookingId]);
+    logAudit($userId, 'CANCEL_BOOKING', "Cancelled booking #{$bookingId}", 'bookings');
+    setFlash('success', 'Booking #' . $bookingId . ' has been cancelled.');
     redirect(APP_URL . '/customer/bookings.php');
 }
 ?>
@@ -65,7 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div style="display:grid;gap:12px;margin-bottom:24px;font-size:0.9rem;">
             <div class="flex-between" style="padding:10px 0;border-bottom:1px solid var(--border-color);">
                 <span style="color:var(--text-secondary);">Reference</span>
-                <strong style="color:var(--accent-teal);"><?= $booking['booking_reference'] ?></strong>
+                <strong style="color:var(--accent-teal);"><?= htmlspecialchars(getBookingRef($booking)) ?></strong>
             </div>
             <div class="flex-between" style="padding:10px 0;border-bottom:1px solid var(--border-color);">
                 <span style="color:var(--text-secondary);">Package</span>

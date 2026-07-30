@@ -19,48 +19,60 @@ if (!$booking) {
     redirect(APP_URL . '/cashier/payments.php');
 }
 
-if ($booking['payment_status'] === 'paid') {
+$amountPaid  = (float)($booking['amount_paid'] ?? 0);
+$totalAmount = (float)($booking['total_amount'] ?? 0);
+$balance     = max(0.0, $totalAmount - $amountPaid);
+
+if (($booking['status'] ?? '') === 'Paid' || ($balance <= 0 && $totalAmount > 0)) {
     setFlash('info', 'This booking is already fully paid.');
     redirect(APP_URL . '/cashier/payments.php');
 }
 
-$balance = $booking['total_amount'] - $booking['amount_paid'];
-$errors  = [];
+$errors = [];
 
 // Get previous payments for this booking
-$prevStmt = $db->prepare("SELECT py.*, u.name AS cashier_name FROM payments py JOIN users u ON py.cashier_id = u.id WHERE py.booking_id = ? ORDER BY py.payment_date DESC");
+$prevStmt = $db->prepare("SELECT py.*, u.name AS cashier_name FROM payments py JOIN users u ON py.cashier_id = u.user_id WHERE py.booking_id = ? ORDER BY py.payment_date DESC");
 $prevStmt->execute([$bookingId]);
 $prevPayments = $prevStmt->fetchAll();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $amount    = (float)($_POST['amount_paid']    ?? 0);
-    $method    = sanitize($_POST['payment_method']?? 'cash');
-    $reference = sanitize($_POST['reference_no']  ?? '');
-    $notes     = sanitize($_POST['notes']         ?? '');
+    $payType   = sanitize($_POST['payment_type']  ?? ($amount >= $balance ? 'full' : 'downpayment'));
 
     if ($amount <= 0)      $errors[] = 'Payment amount must be greater than 0.';
     if ($amount > $balance) $errors[] = 'Amount cannot exceed the remaining balance of ' . formatCurrency($balance) . '.';
 
-    $allowedMethods = ['cash','gcash','bank_transfer','credit_card'];
-    if (!in_array($method, $allowedMethods)) $errors[] = 'Invalid payment method.';
+    $method    = sanitize($_POST['payment_method']?? 'cash');
+    $reference = sanitize($_POST['reference_no']  ?? '');
+    $notes     = sanitize($_POST['notes']         ?? '');
 
     if (empty($errors)) {
         $db->beginTransaction();
         try {
-            // Insert payment record
-            $ins = $db->prepare("INSERT INTO payments (booking_id, cashier_id, amount_paid, payment_method, reference_no, notes) VALUES (?, ?, ?, ?, ?, ?)");
-            $ins->execute([$bookingId, $cashier['id'], $amount, $method, $reference ?: null, $notes ?: null]);
+            $cashierId = $cashier['user_id'] ?? $cashier['id'];
+            $orNumber  = 'OR-' . date('Y') . '-' . str_pad(rand(1, 99999), 5, '0', STR_PAD_LEFT);
 
-            // Update booking amount_paid
-            $upd = $db->prepare("UPDATE bookings SET amount_paid = amount_paid + ?, status = IF(status = 'pending', 'confirmed', status) WHERE id = ?");
-            $upd->execute([$amount, $bookingId]);
+            try {
+                $ins = $db->prepare("INSERT INTO payments (booking_id, cashier_id, amount_paid, payment_type, payment_method, reference_no, or_number, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+                $ins->execute([$bookingId, $cashierId, $amount, $payType, $method, $reference ?: null, $orNumber, $notes ?: null]);
+            } catch (PDOException $e) {
+                $ins = $db->prepare("INSERT INTO payments (booking_id, cashier_id, amount_paid, payment_type, or_number) VALUES (?, ?, ?, ?, ?)");
+                $ins->execute([$bookingId, $cashierId, $amount, $payType, $orNumber]);
+            }
 
-            // Update payment status
+            // Update booking status & amount_paid
+            try {
+                $upd = $db->prepare("UPDATE bookings SET amount_paid = COALESCE(amount_paid, 0) + ? WHERE booking_id = ?");
+                $upd->execute([$amount, $bookingId]);
+            } catch (PDOException $e) {
+                // Ignore if amount_paid column doesn't exist
+            }
+
             updateBookingPaymentStatus($bookingId);
 
             $db->commit();
 
-            logAudit($cashier['id'], 'PAYMENT', "Processed payment of " . formatCurrency($amount) . " for booking #{$bookingId}", 'payments');
+            logAudit($cashierId, 'PAYMENT', "Processed payment of " . formatCurrency($amount) . " for booking #{$bookingId}", 'payments');
             setFlash('success', 'Payment of ' . formatCurrency($amount) . ' processed successfully!');
             redirect(APP_URL . '/cashier/payments.php');
         } catch (Exception $e) {
@@ -76,7 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <div class="page-header">
     <div>
         <h1>Process Payment</h1>
-        <p>Booking: <strong style="color:var(--accent-teal);"><?= $booking['booking_reference'] ?></strong></p>
+        <p>Booking: <strong style="color:var(--accent-teal);"><?= htmlspecialchars(getBookingRef($booking)) ?></strong></p>
     </div>
     <a href="<?= APP_URL ?>/cashier/payments.php" class="btn btn-secondary">
         <i class="fa-solid fa-arrow-left"></i> Back
@@ -173,7 +185,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:10px;background:rgba(39,174,96,0.05);border-radius:var(--radius-sm);border:1px solid rgba(39,174,96,0.15);">
                     <div>
                         <div style="font-size:0.85rem;font-weight:600;"><?= formatCurrency($py['amount_paid']) ?></div>
-                        <div style="font-size:0.75rem;color:var(--text-secondary);"><?= ucwords(str_replace('_',' ',$py['payment_method'])) ?> • <?= formatDate($py['payment_date']) ?></div>
+                        <div style="font-size:0.75rem;color:var(--text-secondary);"><?= ucwords(str_replace('_',' ', $py['payment_method'] ?? 'cash')) ?> • <?= formatDate($py['payment_date']) ?></div>
                     </div>
                     <div style="font-size:0.75rem;color:var(--text-muted);">By <?= htmlspecialchars($py['cashier_name']) ?></div>
                 </div>

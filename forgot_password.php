@@ -14,16 +14,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $type    = 'error';
     } else {
         $db   = getDB();
-        $stmt = $db->prepare("SELECT id, name FROM users WHERE email = ? AND status = 'active'");
+        $stmt = $db->prepare("SELECT user_id AS id, user_id, name FROM users WHERE email = ? AND status = 'active'");
         $stmt->execute([$email]);
         $user = $stmt->fetch();
 
         if ($user) {
-            $token   = bin2hex(random_bytes(32));
-            $expires = date('Y-m-d H:i:s', strtotime('+1 hour'));
-            $upd     = $db->prepare("UPDATE users SET reset_token = ?, reset_expires = ? WHERE id = ?");
-            $upd->execute([$token, $expires, $user['id']]);
-            logAudit($user['id'], 'PASSWORD_RESET_REQUEST', 'Password reset requested for: ' . $email, 'users');
+            logAudit($user['user_id'], 'PASSWORD_RESET_REQUEST', 'Password reset requested for: ' . $email, 'users');
         }
 
         // Always show same message to prevent email enumeration

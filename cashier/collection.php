@@ -9,28 +9,30 @@ $db      = getDB();
 $dateFrom = sanitize($_GET['from'] ?? date('Y-m-01'));
 $dateTo   = sanitize($_GET['to']   ?? date('Y-m-d'));
 
+$userId = $cashier['user_id'] ?? $cashier['id'];
+
 $stmt = $db->prepare("
-    SELECT py.*, b.booking_reference, b.total_amount AS booking_total,
-           u.name AS customer_name, p.name AS package_name
+    SELECT py.*, py.payment_id AS id, b.total_amount AS booking_total,
+           u.name AS customer_name, p.package_name AS package_name
     FROM payments py
-    JOIN bookings b ON py.booking_id = b.id
-    JOIN users u ON b.customer_id = u.id
-    JOIN packages p ON b.package_id = p.id
+    JOIN bookings b ON py.booking_id = b.booking_id
+    JOIN users u ON b.customer_id = u.user_id
+    JOIN packages p ON b.package_id = p.package_id
     WHERE py.cashier_id = ?
       AND DATE(py.payment_date) BETWEEN ? AND ?
     ORDER BY py.payment_date DESC
 ");
-$stmt->execute([$cashier['id'], $dateFrom, $dateTo]);
+$stmt->execute([$userId, $dateFrom, $dateTo]);
 $payments = $stmt->fetchAll();
 
 // Totals
 $totalStmt = $db->prepare("SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE cashier_id = ? AND DATE(payment_date) BETWEEN ? AND ?");
-$totalStmt->execute([$cashier['id'], $dateFrom, $dateTo]);
+$totalStmt->execute([$userId, $dateFrom, $dateTo]);
 $totalCollected = $totalStmt->fetchColumn();
 
-// Method breakdown
-$methodStmt = $db->prepare("SELECT payment_method, SUM(amount_paid) AS total, COUNT(*) AS count FROM payments WHERE cashier_id = ? AND DATE(payment_date) BETWEEN ? AND ? GROUP BY payment_method");
-$methodStmt->execute([$cashier['id'], $dateFrom, $dateTo]);
+// Type breakdown
+$methodStmt = $db->prepare("SELECT payment_type AS payment_method, SUM(amount_paid) AS total, COUNT(*) AS count FROM payments WHERE cashier_id = ? AND DATE(payment_date) BETWEEN ? AND ? GROUP BY payment_type");
+$methodStmt->execute([$userId, $dateFrom, $dateTo]);
 $methodBreakdown = $methodStmt->fetchAll();
 ?>
 
@@ -82,7 +84,7 @@ $methodBreakdown = $methodStmt->fetchAll();
         <div class="stat-icon" style="background:rgba(245,166,35,0.2);color:#f5a623;"><i class="fa-solid fa-coins"></i></div>
         <div class="stat-info">
             <div class="stat-value" style="font-size:1.2rem;"><?= formatCurrency($mb['total']) ?></div>
-            <div class="stat-label"><?= ucwords(str_replace('_',' ',$mb['payment_method'])) ?> (<?= $mb['count'] ?>)</div>
+            <div class="stat-label"><?= ucwords(str_replace('_',' ', $mb['payment_method'] ?? 'cash')) ?> (<?= $mb['count'] ?>)</div>
         </div>
     </div>
     <?php endforeach; ?>
@@ -124,10 +126,10 @@ $methodBreakdown = $methodStmt->fetchAll();
                         <td><?= $i + 1 ?></td>
                         <td><?= formatDateTime($py['payment_date']) ?></td>
                         <td><?= htmlspecialchars($py['customer_name']) ?></td>
-                        <td><strong style="color:var(--accent-teal);"><?= $py['booking_reference'] ?></strong></td>
+                        <td><strong style="color:var(--accent-teal);"><?= htmlspecialchars(getBookingRef($py)) ?></strong></td>
                         <td><?= htmlspecialchars($py['package_name']) ?></td>
                         <td><strong style="color:#27ae60;"><?= formatCurrency($py['amount_paid']) ?></strong></td>
-                        <td><span class="badge badge-info"><?= ucwords(str_replace('_',' ',$py['payment_method'])) ?></span></td>
+                        <td><span class="badge badge-info"><?= ucwords(str_replace('_',' ', $py['payment_method'] ?? 'cash')) ?></span></td>
                         <td><?= htmlspecialchars($py['reference_no'] ?? '—') ?></td>
                     </tr>
                     <?php endforeach; ?>

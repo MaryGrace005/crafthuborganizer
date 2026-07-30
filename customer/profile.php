@@ -19,10 +19,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (empty($name)) $errors[] = 'Name is required.';
 
         if (empty($errors)) {
-            $stmt = $db->prepare("UPDATE users SET name = ?, phone = ?, address = ? WHERE id = ?");
-            $stmt->execute([$name, $phone, $address, $user['id']]);
+            $userId = $user['user_id'] ?? $user['id'];
+            $stmt = $db->prepare("UPDATE users SET name = ?, contact_no = ?, address = ? WHERE user_id = ?");
+            $stmt->execute([$name, $phone, $address, $userId]);
             $_SESSION['user_name'] = $name;
-            logAudit($user['id'], 'UPDATE_PROFILE', 'Updated profile information', 'users');
+            logAudit($userId, 'UPDATE_PROFILE', 'Updated profile information', 'users');
             setFlash('success', 'Profile updated successfully!');
             redirect(APP_URL . '/customer/profile.php');
         }
@@ -36,10 +37,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($new !== $confirm) $errors[] = 'New passwords do not match.';
 
         if (empty($errors)) {
+            $userId = $user['user_id'] ?? $user['id'];
             $hash = password_hash($new, PASSWORD_DEFAULT);
-            $stmt = $db->prepare("UPDATE users SET password = ? WHERE id = ?");
-            $stmt->execute([$hash, $user['id']]);
-            logAudit($user['id'], 'CHANGE_PASSWORD', 'Password changed successfully', 'users');
+            $stmt = $db->prepare("UPDATE users SET password = ? WHERE user_id = ?");
+            $stmt->execute([$hash, $userId]);
+            logAudit($userId, 'CHANGE_PASSWORD', 'Password changed successfully', 'users');
             setFlash('success', 'Password changed successfully!');
             redirect(APP_URL . '/customer/profile.php');
         }

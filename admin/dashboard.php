@@ -8,8 +8,10 @@ $db    = getDB();
 
 // Recent bookings
 $recent = $db->query("
-    SELECT b.*, u.name AS customer_name, p.name AS package_name
-    FROM bookings b JOIN users u ON b.customer_id = u.id JOIN packages p ON b.package_id = p.id
+    SELECT b.*, b.booking_id AS id, u.name AS customer_name, p.package_name AS package_name
+    FROM bookings b 
+    JOIN users u ON b.customer_id = u.user_id 
+    JOIN packages p ON b.package_id = p.package_id
     ORDER BY b.created_at DESC LIMIT 6
 ")->fetchAll();
 
@@ -96,7 +98,7 @@ $revenueData = $revenueStmt->fetchAll();
                 <tbody>
                     <?php foreach ($recent as $b): ?>
                     <tr>
-                        <td><span style="color:var(--accent-teal);font-size:0.82rem;"><?= $b['booking_reference'] ?></span></td>
+                        <td><span style="color:var(--accent-teal);font-size:0.82rem;"><?= htmlspecialchars(getBookingRef($b)) ?></span></td>
                         <td><?= htmlspecialchars($b['customer_name']) ?></td>
                         <td><?= htmlspecialchars($b['package_name']) ?></td>
                         <td><?= statusBadge($b['status']) ?></td>

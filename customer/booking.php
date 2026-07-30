@@ -8,12 +8,38 @@ $user       = getCurrentUser();
 $packageId  = (int)($_GET['package_id'] ?? 0);
 
 // Load packages and venues for form
-$packages = $db->query("SELECT * FROM packages WHERE status = 'active' ORDER BY name")->fetchAll();
-$venues   = $db->query("SELECT * FROM venues WHERE status = 'available' ORDER BY name")->fetchAll();
+$packages = $db->query("SELECT package_id AS id, package_id, package_name AS name, package_name, base_price AS price, base_price, event_type, description, status FROM packages WHERE status = 'active' ORDER BY package_name")->fetchAll();
+$venues   = $db->query("SELECT venue_id AS id, venue_id, venue_name AS name, venue_name, capacity, location, availability_status FROM venues WHERE availability_status = 'available' ORDER BY venue_name")->fetchAll();
+
+// Build JS maps
+$pkgPriceMap      = [];
+$pkgInclusionsMap = [];
+$venuePriceMap    = [];
+
+foreach ($packages as $p) {
+    $pkgPriceMap[$p['id']] = $p['price'];
+    
+    // Fetch inclusions for JS
+    $cStmt = $db->prepare("SELECT category, name, description FROM package_components WHERE package_id = ? ORDER BY category, name");
+    $cStmt->execute([$p['id']]);
+    $comps = $cStmt->fetchAll();
+    
+    $pkgInclusionsMap[$p['id']] = array_map(function($c) {
+        return [
+            'name'        => $c['name'],
+            'category'    => $c['category'],
+            'description' => $c['description']
+        ];
+    }, $comps);
+}
+
+foreach ($venues as $v) {
+    $venuePriceMap[$v['id']] = 0;
+}
 
 $selectedPackage = null;
 if ($packageId) {
-    $stmt = $db->prepare("SELECT * FROM packages WHERE id = ? AND status = 'active'");
+    $stmt = $db->prepare("SELECT package_id AS id, package_id, package_name AS name, base_price AS price FROM packages WHERE package_id = ? AND status = 'active'");
     $stmt->execute([$packageId]);
     $selectedPackage = $stmt->fetch();
 }
@@ -21,8 +47,8 @@ if ($packageId) {
 $errors = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $pkgId    = (int)($_POST['package_id'] ?? 0);
-    $venueId  = (int)($_POST['venue_id']   ?? 0) ?: null;
+    $pkgId     = (int)($_POST['package_id'] ?? 0);
+    $venueId   = (int)($_POST['venue_id']   ?? 0) ?: null;
     $eventDate = sanitize($_POST['event_date'] ?? '');
     $eventTime = sanitize($_POST['event_time'] ?? '09:00');
     $numGuests = (int)($_POST['num_guests']  ?? 1);
@@ -35,45 +61,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (empty($errors)) {
         // Calculate total
-        $pkgStmt = $db->prepare("SELECT price FROM packages WHERE id = ?");
+        $pkgStmt = $db->prepare("SELECT base_price, event_type FROM packages WHERE package_id = ?");
         $pkgStmt->execute([$pkgId]);
         $pkg = $pkgStmt->fetch();
 
-        $venuePrice = 0;
-        if ($venueId) {
-            $vStmt = $db->prepare("SELECT price_per_day FROM venues WHERE id = ?");
-            $vStmt->execute([$venueId]);
-            $v = $vStmt->fetch();
-            $venuePrice = $v ? (float)$v['price_per_day'] : 0;
+        $total = (float)($pkg['base_price'] ?? 0);
+        $eventType = $pkg['event_type'] ?? 'Wedding';
+
+        $ref = generateBookingRef();
+        $userId = $user['user_id'] ?? $user['id'];
+
+        try {
+            $ins = $db->prepare("
+                INSERT INTO bookings (booking_reference, customer_id, package_id, venue_id, event_date, event_time, event_type, guest_count, total_amount, status, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?)
+            ");
+            $ins->execute([$ref, $userId, $pkgId, $venueId, $eventDate, $eventTime, $eventType, $numGuests, $total, $notes]);
+        } catch (PDOException $e) {
+            $ins = $db->prepare("
+                INSERT INTO bookings (customer_id, package_id, venue_id, event_date, event_type, guest_count, total_amount, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'Pending')
+            ");
+            $ins->execute([$userId, $pkgId, $venueId, $eventDate, $eventType, $numGuests, $total]);
         }
 
-        $total = (float)$pkg['price'] + $venuePrice;
-        $ref   = generateBookingRef();
-
-        $ins = $db->prepare("
-            INSERT INTO bookings (booking_reference, customer_id, package_id, venue_id, event_date, event_time, num_guests, total_amount, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ");
-        $ins->execute([$ref, $user['id'], $pkgId, $venueId, $eventDate, $eventTime, $numGuests, $total, $notes]);
-
-        logAudit($user['id'], 'BOOKING', "Created booking {$ref} for package #{$pkgId}", 'bookings');
-        setFlash('success', "Booking submitted! Reference: {$ref}. Please wait for confirmation.");
+        logAudit($userId, 'BOOKING', "Created booking #{$ref} for package #{$pkgId}", 'bookings');
+        setFlash('success', "Booking submitted successfully! Please wait for confirmation.");
         redirect(APP_URL . '/customer/bookings.php');
     }
 }
-
-// Build JS price maps
-$pkgPriceMap   = [];
-$venuePriceMap = [];
-foreach ($packages as $p)  $pkgPriceMap[$p['id']]   = $p['price'];
-foreach ($venues   as $v)  $venuePriceMap[$v['id']]  = $v['price_per_day'];
 ?>
 
 <?php require_once __DIR__ . '/../includes/navbar.php'; ?>
 
 <script>
-    window.packagePrices = <?= json_encode($pkgPriceMap) ?>;
-    window.venuePrices   = <?= json_encode($venuePriceMap) ?>;
+    window.packagePrices      = <?= json_encode($pkgPriceMap) ?>;
+    window.packageInclusions  = <?= json_encode($pkgInclusionsMap) ?>;
+    window.venuePrices        = <?= json_encode($venuePriceMap) ?>;
 </script>
 
 <div class="page-header">
@@ -104,7 +128,7 @@ foreach ($venues   as $v)  $venuePriceMap[$v['id']]  = $v['price_per_day'];
 
             <div class="form-group">
                 <label class="form-label" for="package_id">Select Package <span style="color:var(--accent-red);">*</span></label>
-                <select id="package_id" name="package_id" class="form-control" required>
+                <select id="package_id" name="package_id" class="form-control" required onchange="updateBookingSummary()">
                     <option value="">-- Choose a package --</option>
                     <?php foreach ($packages as $p): ?>
                         <option value="<?= $p['id'] ?>"
@@ -117,11 +141,11 @@ foreach ($venues   as $v)  $venuePriceMap[$v['id']]  = $v['price_per_day'];
 
             <div class="form-group">
                 <label class="form-label" for="venue_id">Select Venue <span style="color:var(--text-muted)">(optional)</span></label>
-                <select id="venue_id" name="venue_id" class="form-control">
+                <select id="venue_id" name="venue_id" class="form-control" onchange="updateBookingSummary()">
                     <option value="">-- No specific venue --</option>
                     <?php foreach ($venues as $v): ?>
                         <option value="<?= $v['id'] ?>" <?= ($_POST['venue_id'] ?? '') == $v['id'] ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($v['name']) ?> — +<?= formatCurrency($v['price_per_day']) ?>
+                            <?= htmlspecialchars($v['name']) ?> (Capacity: <?= (int)($v['capacity'] ?? 0) ?>)
                         </option>
                     <?php endforeach; ?>
                 </select>
@@ -165,19 +189,28 @@ foreach ($venues   as $v)  $venuePriceMap[$v['id']]  = $v['price_per_day'];
             <div class="card-header">
                 <h2 class="card-title"><i class="fa-solid fa-receipt"></i> Booking Summary</h2>
             </div>
-            <div style="text-align:center;padding:20px 0;">
-                <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px;">Estimated Total</div>
-                <div id="total_display" style="font-family:'Outfit',sans-serif;font-size:2.5rem;font-weight:800;color:var(--accent-gold);">
+            <div style="text-align:center;padding:16px 0 10px;">
+                <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:4px;">Estimated Total</div>
+                <div id="total_display" style="font-family:'Outfit',sans-serif;font-size:2.4rem;font-weight:800;color:var(--accent-gold);">
                     ₱ 0.00
                 </div>
                 <input type="hidden" id="total_amount" name="total_amount" value="0">
-                <div style="font-size:0.8rem;color:var(--text-muted);margin-top:8px;">Package price + venue fee</div>
+                <div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px;">Base package price</div>
             </div>
 
-            <div style="padding:16px;background:rgba(78,205,196,0.05);border-radius:var(--radius-md);border:1px solid rgba(78,205,196,0.15);">
-                <p style="font-size:0.83rem;color:var(--text-secondary);line-height:1.6;">
+            <!-- Inclusions Box -->
+            <div id="inclusions_box" style="display:none;margin-bottom:16px;padding:14px;background:rgba(78,205,196,0.06);border-radius:var(--radius-sm);border:1px solid rgba(78,205,196,0.2);">
+                <div style="font-weight:700;font-size:0.82rem;color:var(--accent-teal);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px;">
+                    <i class="fa-solid fa-list-check"></i> Package Inclusions:
+                </div>
+                <ul id="inclusions_list" style="list-style:none;padding:0;margin:0;display:grid;gap:6px;font-size:0.82rem;color:var(--text-primary);">
+                </ul>
+            </div>
+
+            <div style="padding:14px;background:rgba(255,255,255,0.03);border-radius:var(--radius-md);border:1px solid var(--border-color);">
+                <p style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6;margin:0;">
                     <i class="fa-solid fa-info-circle" style="color:var(--accent-teal);"></i>
-                    Your booking will be reviewed and confirmed by our team. Payment can be made upon confirmation.
+                    Your booking will be reviewed and confirmed by our team.
                 </p>
             </div>
         </div>
@@ -194,5 +227,47 @@ foreach ($venues   as $v)  $venuePriceMap[$v['id']]  = $v['price_per_day'];
         </div>
     </div>
 </div>
+
+<script>
+function updateBookingSummary() {
+    var pkgId = document.getElementById('package_id').value;
+    var totalDisplay = document.getElementById('total_display');
+    var incBox = document.getElementById('inclusions_box');
+    var incList = document.getElementById('inclusions_list');
+
+    var price = window.packagePrices[pkgId] || 0;
+    totalDisplay.innerText = '₱ ' + parseFloat(price).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+    if (pkgId && window.packageInclusions[pkgId] && window.packageInclusions[pkgId].length > 0) {
+        var items = window.packageInclusions[pkgId];
+        var html = '';
+        items.forEach(function(item) {
+            html += '<li style="display:flex;align-items:flex-start;gap:6px;">';
+            html += '<i class="fa-solid fa-check" style="color:var(--accent-teal);margin-top:3px;font-size:0.75rem;"></i>';
+            html += '<div><strong>' + escapeHtml(item.name) + '</strong>';
+            if (item.description) {
+                html += ' <span style="color:var(--text-muted);font-size:0.75rem;">(' + escapeHtml(item.description) + ')</span>';
+            }
+            html += '</div></li>';
+        });
+        incList.innerHTML = html;
+        incBox.style.display = 'block';
+    } else if (pkgId) {
+        incList.innerHTML = '<li style="color:var(--text-muted);font-style:italic;">Standard craft package inclusions.</li>';
+        incBox.style.display = 'block';
+    } else {
+        incBox.style.display = 'none';
+    }
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    updateBookingSummary();
+});
+</script>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>

@@ -19,22 +19,22 @@ $totalBookings = $bookStmt->fetchColumn();
 
 // Most popular packages
 $topPkgStmt = $db->prepare("
-    SELECT p.name, COUNT(b.id) AS booking_count, SUM(b.total_amount) AS revenue
+    SELECT p.package_name AS name, COUNT(b.booking_id) AS booking_count, SUM(b.total_amount) AS revenue
     FROM bookings b
-    JOIN packages p ON b.package_id = p.id
+    JOIN packages p ON b.package_id = p.package_id
     WHERE DATE(b.created_at) BETWEEN ? AND ?
-    GROUP BY p.id ORDER BY booking_count DESC LIMIT 5
+    GROUP BY p.package_id ORDER BY booking_count DESC LIMIT 5
 ");
 $topPkgStmt->execute([$dateFrom, $dateTo]);
 $topPackages = $topPkgStmt->fetchAll();
 
 // Payments detail
 $paymentsStmt = $db->prepare("
-    SELECT py.*, b.booking_reference, u.name AS cashier_name, c.name AS customer_name
+    SELECT py.*, py.payment_id AS id, u.name AS cashier_name, c.name AS customer_name
     FROM payments py
-    JOIN bookings b ON py.booking_id = b.id
-    JOIN users u ON py.cashier_id = u.id
-    JOIN users c ON b.customer_id = c.id
+    JOIN bookings b ON py.booking_id = b.booking_id
+    JOIN users u ON py.cashier_id = u.user_id
+    JOIN users c ON b.customer_id = c.user_id
     WHERE DATE(py.payment_date) BETWEEN ? AND ?
     ORDER BY py.payment_date DESC
 ");
@@ -133,10 +133,10 @@ $payments = $paymentsStmt->fetchAll();
                     <tbody>
                         <?php foreach ($payments as $py): ?>
                         <tr>
-                            <td><span style="color:var(--accent-teal);"><?= $py['booking_reference'] ?></span></td>
+                            <td><span style="color:var(--accent-teal);"><?= htmlspecialchars(getBookingRef($py)) ?></span></td>
                             <td><?= htmlspecialchars($py['customer_name']) ?></td>
                             <td style="color:#27ae60;font-weight:700;"><?= formatCurrency($py['amount_paid']) ?></td>
-                            <td><?= ucwords(str_replace('_',' ',$py['payment_method'])) ?></td>
+                            <td><?= ucwords(str_replace('_',' ', $py['payment_method'] ?? 'cash')) ?></td>
                             <td><?= htmlspecialchars($py['cashier_name']) ?></td>
                         </tr>
                         <?php endforeach; ?>

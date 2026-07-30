@@ -28,16 +28,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $statusFilter = sanitize($_GET['status'] ?? 'all');
-$sql = "SELECT b.*, u.name AS customer_name, u.email AS customer_email, p.name AS package_name, v.name AS venue_name
+$sql = "SELECT b.*, b.booking_id AS id, u.name AS customer_name, u.email AS customer_email, p.package_name AS package_name, v.venue_name AS venue_name
         FROM bookings b
-        JOIN users u ON b.customer_id = u.id
-        JOIN packages p ON b.package_id = p.id
-        LEFT JOIN venues v ON b.venue_id = v.id";
+        JOIN users u ON b.customer_id = u.user_id
+        JOIN packages p ON b.package_id = p.package_id
+        LEFT JOIN venues v ON b.venue_id = v.venue_id";
 $params = [];
 
 if ($statusFilter !== 'all') {
     $sql .= " WHERE b.status = ?";
-    $params[] = $statusFilter;
+    $params[] = ucfirst($statusFilter);
 }
 
 $sql .= " ORDER BY b.created_at DESC";
@@ -89,18 +89,21 @@ $bookings = $stmt->fetchAll();
             <tbody>
                 <?php foreach ($bookings as $b): ?>
                 <tr>
-                    <td><strong style="color:var(--accent-teal);"><?= $b['booking_reference'] ?></strong></td>
+                    <td><strong style="color:var(--accent-teal);"><?= htmlspecialchars(getBookingRef($b)) ?></strong></td>
                     <td>
                         <div style="font-weight:600;"><?= htmlspecialchars($b['customer_name']) ?></div>
                         <div style="font-size:0.78rem;color:var(--text-secondary);"><?= htmlspecialchars($b['customer_email']) ?></div>
                     </td>
                     <td><?= htmlspecialchars($b['package_name']) ?></td>
                     <td><?= htmlspecialchars($b['venue_name'] ?? '—') ?></td>
-                    <td><?= formatDate($b['event_date']) ?><br><small style="color:var(--text-muted);"><?= date('g:i A', strtotime($b['event_time'])) ?></small></td>
+                    <td><?= formatDate($b['event_date']) ?><br><small style="color:var(--text-muted);"><?= date('g:i A', strtotime($b['event_time'] ?? '09:00:00')) ?></small></td>
                     <td><?= formatCurrency($b['total_amount']) ?></td>
                     <td><?= statusBadge($b['status']) ?></td>
-                    <td><?= statusBadge($b['payment_status']) ?></td>
+                    <td><?= statusBadge($b['status']) ?></td>
                     <td>
+                        <a href="<?= APP_URL ?>/booking_images.php?booking_id=<?= $b['id'] ?>" class="btn btn-secondary btn-sm" title="View & Upload Photos">
+                            <i class="fa-solid fa-camera"></i> Photos
+                        </a>
                         <button class="btn btn-warning btn-sm" data-modal="editStatusModal"
                                 data-edit='<?= json_encode(['id'=>$b['id'], 'status'=>$b['status']]) ?>'>
                             <i class="fa-solid fa-pen-to-square"></i> Status
@@ -108,7 +111,7 @@ $bookings = $stmt->fetchAll();
                         <form method="POST" style="display:inline;">
                             <input type="hidden" name="action" value="delete">
                             <input type="hidden" name="id" value="<?= $b['id'] ?>">
-                            <button type="submit" class="btn btn-danger btn-sm" data-confirm="Delete booking <?= $b['booking_reference'] ?>?">
+                            <button type="submit" class="btn btn-danger btn-sm" data-confirm="Delete booking <?= htmlspecialchars(getBookingRef($b)) ?>?">
                                 <i class="fa-solid fa-trash"></i>
                             </button>
                         </form>

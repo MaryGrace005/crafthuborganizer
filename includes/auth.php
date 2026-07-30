@@ -41,7 +41,7 @@ function requireRole(array $roles): void {
 function getCurrentUser(): ?array {
     if (!isLoggedIn()) return null;
     $db   = getDB();
-    $stmt = $db->prepare("SELECT * FROM users WHERE id = ? AND status = 'active'");
+    $stmt = $db->prepare("SELECT *, user_id AS id, contact_no AS phone FROM users WHERE user_id = ? AND status = 'active'");
     $stmt->execute([$_SESSION['user_id']]);
     return $stmt->fetch() ?: null;
 }
@@ -62,7 +62,7 @@ function redirectByRole(string $role): void {
 //  Login a user (call after credentials verified)
 // -----------------------------------------------
 function loginUser(array $user): void {
-    $_SESSION['user_id']    = $user['id'];
+    $_SESSION['user_id']    = $user['user_id'] ?? $user['id'];
     $_SESSION['user_name']  = $user['name'];
     $_SESSION['user_email'] = $user['email'];
     $_SESSION['user_role']  = $user['role'];

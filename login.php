@@ -17,13 +17,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'Please enter both email and password.';
     } else {
         $db   = getDB();
-        $stmt = $db->prepare("SELECT * FROM users WHERE email = ? AND status = 'active' LIMIT 1");
+        $stmt = $db->prepare("SELECT *, user_id AS id FROM users WHERE email = ? AND status = 'active' LIMIT 1");
         $stmt->execute([$email]);
         $user = $stmt->fetch();
 
         if ($user && password_verify($password, $user['password'])) {
+
+            // ── IP Enforcement for Customer Accounts ──────────────────────
+            if ($user['role'] === 'customer') {
+                $clientIp = $_SERVER['HTTP_X_FORWARDED_FOR']
+                    ?? $_SERVER['HTTP_CLIENT_IP']
+                    ?? $_SERVER['REMOTE_ADDR']
+                    ?? '0.0.0.0';
+                // Take first IP if X-Forwarded-For has multiple
+                $clientIp = trim(explode(',', $clientIp)[0]);
+
+                $storedIp = $user['ip_address'] ?? null;
+
+                if ($storedIp === null || $storedIp === '') {
+                    // First login — record IP
+                    $db->prepare("UPDATE users SET ip_address = ? WHERE user_id = ?")
+                       ->execute([$clientIp, $user['user_id'] ?? $user['id']]);
+                } elseif ($storedIp !== $clientIp) {
+                    // IP mismatch — block login
+                    $error = 'Login blocked: Access from this device is not authorized for your account. Please contact the admin.';
+                    logAudit(0, 'IP_BLOCK', "IP mismatch for {$email}: stored={$storedIp}, attempt={$clientIp}", 'users');
+                    goto end_login;
+                }
+            }
+            // ─────────────────────────────────────────────────────────────
+
             loginUser($user);
-            logAudit($user['id'], 'LOGIN', 'User logged in successfully.', 'users');
+            logAudit($user['user_id'] ?? $user['id'], 'LOGIN', 'User logged in successfully.', 'users');
             setFlash('success', 'Welcome back, ' . $user['name'] . '!');
             redirectByRole($user['role']);
         } else {
@@ -32,6 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 }
+end_login:
 ?>
 
 <div class="auth-page">

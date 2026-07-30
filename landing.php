@@ -10,6 +10,9 @@ require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/auth.php';
 
+// Ensure sample images exist in assets/images/
+@include_once __DIR__ . '/copy_images.php';
+
 // If already logged in, go straight to dashboard
 if (isLoggedIn()) {
     redirectByRole($_SESSION['user_role']);
@@ -18,11 +21,26 @@ if (isLoggedIn()) {
 // Load active packages for preview (max 3)
 function getLandingPackages(): array {
     $db   = getDB();
-    $stmt = $db->query("SELECT * FROM packages WHERE status = 'active' ORDER BY price ASC LIMIT 3");
-    return $stmt->fetchAll();
+    $stmt = $db->query("SELECT p.*, p.package_id AS id, p.package_name AS name, p.base_price AS price FROM packages p WHERE p.status = 'active' ORDER BY p.base_price ASC LIMIT 3");
+    $pkgs = $stmt->fetchAll();
+
+    foreach ($pkgs as &$pkg) {
+        $cStmt = $db->prepare("SELECT name FROM package_components WHERE package_id = ? LIMIT 4");
+        $cStmt->execute([$pkg['id']]);
+        $pkg['components'] = $cStmt->fetchAll();
+    }
+    unset($pkg);
+    return $pkgs;
 }
 
 $packages = getLandingPackages();
+
+$defaultImages = [
+    'Wedding'    => 'assets/images/packages/wedding.png',
+    'Birthday'   => 'assets/images/packages/birthday.png',
+    'Debut'      => 'assets/images/packages/debut.png',
+    'Christening'=> 'assets/images/packages/christening.png',
+];
 
 // Package icon map by position
 $pkgIcons    = ['fa-wand-magic-sparkles', 'fa-star', 'fa-crown'];
@@ -312,15 +330,25 @@ $pkgFeatured = [false, true, false]; // middle = featured
                     <?php
                         $icon     = $pkgIcons[$i] ?? 'fa-star';
                         $featured = $pkgFeatured[$i] ?? false;
+                        $img      = !empty($pkg['image_url']) ? $pkg['image_url'] : ($defaultImages[$pkg['event_type'] ?? 'Wedding'] ?? 'assets/images/packages/wedding.png');
                     ?>
-                    <div class="pkg-preview-card reveal reveal-delay-<?= $i + 1 ?>">
-                        <div class="pkg-preview-top">
+                    <div class="pkg-preview-card reveal reveal-delay-<?= $i + 1 ?>" style="overflow:hidden;padding:0;">
+                        
+                        <!-- Package Sample Image Banner -->
+                        <div style="position:relative;height:180px;overflow:hidden;background:#1a1a2e;">
+                            <img src="<?= APP_URL ?>/<?= htmlspecialchars($img) ?>"
+                                 alt="<?= htmlspecialchars($pkg['name']) ?>"
+                                 style="width:100%;height:100%;object-fit:cover;display:block;"
+                                 onerror="this.style.display='none';">
                             <?php if ($featured): ?>
-                                <div class="pkg-featured-badge">⭐ Most Popular</div>
+                                <div class="pkg-featured-badge" style="position:absolute;top:12px;right:12px;z-index:2;">⭐ Most Popular</div>
                             <?php endif; ?>
-                            <div class="pkg-preview-icon">
-                                <i class="fa-solid <?= $icon ?>"></i>
+                            <div style="position:absolute;bottom:12px;left:12px;background:rgba(15,15,26,0.8);backdrop-filter:blur(6px);color:var(--accent-teal,#4ecdc4);padding:4px 12px;border-radius:20px;font-size:0.78rem;font-weight:600;">
+                                <i class="fa-solid fa-gift"></i> <?= htmlspecialchars($pkg['event_type'] ?? 'Event') ?>
                             </div>
+                        </div>
+
+                        <div class="pkg-preview-top" style="padding-top:16px;">
                             <div class="pkg-preview-name"><?= htmlspecialchars($pkg['name']) ?></div>
                             <div class="pkg-preview-price">
                                 ₱<?= number_format($pkg['price'], 0) ?>
@@ -329,11 +357,15 @@ $pkgFeatured = [false, true, false]; // middle = featured
                         </div>
                         <div class="pkg-preview-body">
                             <ul class="pkg-preview-features">
-                                <li><i class="fa-solid fa-check-circle"></i><?= htmlspecialchars($pkg['description'] ?? 'Complete craft experience') ?></li>
-                                <li><i class="fa-solid fa-check-circle"></i>Up to <?= $pkg['max_guests'] ?? '20' ?> guests</li>
-                                <li><i class="fa-solid fa-check-circle"></i><?= $pkg['duration_hours'] ?? '3' ?> hours duration</li>
-                                <li><i class="fa-solid fa-check-circle"></i>Venue selection included</li>
-                                <li><i class="fa-solid fa-check-circle"></i>Dedicated event support</li>
+                                <li><i class="fa-solid fa-circle-check"></i><?= htmlspecialchars($pkg['description'] ?: 'Complete craft experience') ?></li>
+                                <?php if (!empty($pkg['components'])): ?>
+                                    <?php foreach ($pkg['components'] as $comp): ?>
+                                        <li><i class="fa-solid fa-circle-check"></i><?= htmlspecialchars($comp['name']) ?></li>
+                                    <?php endforeach; ?>
+                                <?php else: ?>
+                                    <li><i class="fa-solid fa-circle-check"></i>Venue selection & coordination</li>
+                                    <li><i class="fa-solid fa-circle-check"></i>Dedicated event support</li>
+                                <?php endif; ?>
                             </ul>
                             <a href="<?= APP_URL ?>/register.php" class="btn-pkg-book" id="pkg-book-<?= $pkg['id'] ?>">
                                 <i class="fa-solid fa-calendar-plus"></i> Book This Package

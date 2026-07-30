@@ -897,6 +897,153 @@ textarea.form-control { resize: vertical; min-height: 100px; }
 
 .d-none { display: none !important; }
 
+/* ──────────── PACKAGE CARDS (Enhanced) ──────────── */
+
+/* Override grid-auto for package pages specifically */
+.packages-page .grid-auto {
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 28px;
+}
+
+.package-card {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 20px;
+    overflow: hidden;
+    transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+.package-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 20px;
+    background: linear-gradient(135deg,
+        rgba(233, 69, 96, 0.06) 0%,
+        rgba(78, 205, 196, 0.04) 50%,
+        rgba(245, 166, 35, 0.04) 100%);
+    opacity: 0;
+    transition: opacity 0.35s ease;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.package-card:hover {
+    transform: translateY(-8px);
+    border-color: rgba(78, 205, 196, 0.3);
+    box-shadow:
+        0 20px 60px rgba(0, 0, 0, 0.45),
+        0 0 0 1px rgba(78, 205, 196, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.package-card:hover::before { opacity: 1; }
+
+/* Image area — zoom on hover */
+.package-card > div:first-child img {
+    transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.package-card:hover > div:first-child img {
+    transform: scale(1.08);
+}
+
+/* Card header */
+.package-card-header {
+    padding: 18px 20px 10px;
+    position: relative;
+    z-index: 1;
+}
+
+.package-card-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+    line-height: 1.2;
+}
+
+.package-price {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.8rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #f5a623, #e67e22);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.package-price span {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    -webkit-text-fill-color: var(--text-muted);
+}
+
+/* Card body */
+.package-card-body {
+    padding: 12px 20px 16px;
+    flex: 1;
+    position: relative;
+    z-index: 1;
+}
+
+.package-description {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    line-height: 1.55;
+    margin-bottom: 4px;
+}
+
+/* Included details panel */
+.package-card-body > div[style*="border-radius"] {
+    backdrop-filter: blur(4px);
+}
+
+/* Slot availability bar animation */
+@keyframes slotBarFill {
+    from { width: 0; }
+}
+.package-card:hover div[style*="border-radius:20px"][style*="height:100%"] {
+    animation: slotBarFill 0.8s ease forwards;
+}
+
+/* Card footer */
+.package-card-footer {
+    padding: 14px 20px 18px;
+    border-top: 1px solid var(--border-color);
+    position: relative;
+    z-index: 1;
+    background: rgba(255,255,255,0.02);
+}
+
+.package-card-footer .btn-block {
+    justify-content: center;
+    border-radius: 12px;
+    font-size: 0.92rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    padding: 13px 20px;
+}
+
+.package-card-footer .btn-primary {
+    background: linear-gradient(135deg, #e94560 0%, #c0392b 60%, #9b1b2b 100%);
+    box-shadow: 0 4px 20px rgba(233, 69, 96, 0.35);
+}
+
+.package-card-footer .btn-primary:hover {
+    box-shadow: 0 8px 30px rgba(233, 69, 96, 0.5);
+    transform: translateY(-2px);
+}
+
+/* Fully booked state */
+.package-card[style*="opacity:0.75"] {
+    filter: saturate(0.6);
+}
+
 /* ──────────── SCROLLBAR ──────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
