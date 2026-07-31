@@ -12,7 +12,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // CREATE a new customer account (admin only)
     if ($action === 'create') {
-        $name     = sanitize($_POST['name']     ?? '');
+        $firstName  = sanitize($_POST['first_name']  ?? '');
+        $middleName = sanitize($_POST['middle_name'] ?? '');
+        $surname    = sanitize($_POST['surname']     ?? '');
+        $name       = trim(implode(' ', array_filter([$firstName, $middleName, $surname])));
         $email    = sanitize($_POST['email']    ?? '');
         $phone    = sanitize($_POST['phone']    ?? '');
         $address  = sanitize($_POST['address']  ?? '');
@@ -20,7 +23,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $role     = in_array($_POST['role'] ?? '', ['customer','cashier','admin']) ? $_POST['role'] : 'customer';
         $errors   = [];
 
-        if (!$name)  $errors[] = 'Full name is required.';
+        if (!$firstName) $errors[] = 'First name is required.';
+        if (!$surname)   $errors[] = 'Surname is required.';
         if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = 'Valid email is required.';
         if (strlen($tempPass) < 6) $errors[] = 'Password must be at least 6 characters.';
 
@@ -201,9 +205,19 @@ $users = $db->query($sql)->fetchAll();
         <form method="POST">
             <input type="hidden" name="action" value="create">
             <div class="modal-body">
+                <div class="form-row" style="grid-template-columns:1fr 1fr;">
+                    <div class="form-group">
+                        <label class="form-label">First Name <span style="color:var(--accent-red);">*</span></label>
+                        <input type="text" name="first_name" class="form-control" placeholder="e.g. Maria" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Middle Name</label>
+                        <input type="text" name="middle_name" class="form-control" placeholder="e.g. Cruz">
+                    </div>
+                </div>
                 <div class="form-group">
-                    <label class="form-label">Full Name <span style="color:var(--accent-red);">*</span></label>
-                    <input type="text" name="name" class="form-control" placeholder="e.g. Maria Santos" required>
+                    <label class="form-label">Surname <span style="color:var(--accent-red);">*</span></label>
+                    <input type="text" name="surname" class="form-control" placeholder="e.g. Santos" required>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Email Address <span style="color:var(--accent-red);">*</span></label>

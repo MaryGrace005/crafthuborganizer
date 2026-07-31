@@ -130,17 +130,6 @@ end_login:
                 <a href="<?= APP_URL ?>/register.php" class="auth-link">Create one</a>
             </p>
 
-            <div class="mt-3" style="padding:16px;background:rgba(255,255,255,0.03);border-radius:var(--radius-md);border:1px solid var(--border-color);">
-                <p style="font-size:0.8rem;color:var(--text-muted);text-align:center;margin-bottom:10px;">
-                    <i class="fa-solid fa-circle-info"></i> Demo Credentials
-                </p>
-                <div style="display:grid;gap:6px;font-size:0.78rem;color:var(--text-secondary);">
-                    <div><strong style="color:var(--accent-red);">Admin:</strong> admin@crafthub.com</div>
-                    <div><strong style="color:var(--accent-gold);">Cashier:</strong> cashier@crafthub.com</div>
-                    <div><strong style="color:var(--accent-teal);">Customer:</strong> customer@crafthub.com</div>
-                    <div style="color:var(--text-muted);">Password: <code>password</code></div>
-                </div>
-            </div>
         </div>
 
     </div>
