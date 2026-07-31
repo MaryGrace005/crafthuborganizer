@@ -43,8 +43,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 if ($storedIp === null || $storedIp === '') {
                     // First login — record IP
-                    $db->prepare("UPDATE users SET ip_address = ? WHERE user_id = ?")
-                       ->execute([$clientIp, $user['user_id'] ?? $user['id']]);
+                    try {
+                        $db->prepare("UPDATE users SET ip_address = ? WHERE user_id = ?")
+                           ->execute([$clientIp, $user['user_id'] ?? $user['id']]);
+                    } catch (PDOException $e) {
+                        // Ignore duplicate IP constraint error if shared network/localhost
+                    }
                 } elseif ($storedIp !== $clientIp) {
                     // IP mismatch — block login
                     $error = 'Login blocked: Access from this device is not authorized for your account. Please contact the admin.';

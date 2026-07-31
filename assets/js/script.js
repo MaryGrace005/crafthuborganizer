@@ -7,39 +7,93 @@ document.addEventListener('DOMContentLoaded', () => {
     // ──────────── SIDEBAR TOGGLE ────────────
     const sidebar        = document.getElementById('sidebar');
     const mainWrapper    = document.querySelector('.main-wrapper');
-    const sidebarToggle  = document.getElementById('sidebarToggle');
     const topbarToggle   = document.getElementById('topbarToggle');
 
-    function toggleSidebar() {
-        if (window.innerWidth <= 768) {
-            sidebar?.classList.toggle('mobile-open');
-        } else {
-            sidebar?.classList.toggle('collapsed');
-            mainWrapper?.classList.toggle('collapsed');
-            // Save state
-            const isCollapsed = sidebar?.classList.contains('collapsed');
-            localStorage.setItem('sidebarCollapsed', isCollapsed ? '1' : '0');
+    // Create backdrop element for mobile overlay
+    const backdrop = document.createElement('div');
+    backdrop.className = 'sidebar-backdrop';
+    document.body.appendChild(backdrop);
+
+    function isMobile() { return window.innerWidth <= 768; }
+
+    function openMobileSidebar() {
+        sidebar?.classList.add('mobile-open');
+        backdrop.classList.add('visible');
+        document.body.style.overflow = 'hidden';
+        if (topbarToggle) topbarToggle.querySelector('i').className = 'fa-solid fa-xmark';
+    }
+
+    function closeMobileSidebar() {
+        sidebar?.classList.remove('mobile-open');
+        backdrop.classList.remove('visible');
+        document.body.style.overflow = '';
+        if (topbarToggle) topbarToggle.querySelector('i').className = 'fa-solid fa-bars';
+    }
+
+    function toggleDesktopSidebar() {
+        sidebar?.classList.toggle('collapsed');
+        mainWrapper?.classList.toggle('collapsed');
+        const isCollapsed = sidebar?.classList.contains('collapsed');
+        localStorage.setItem('sidebarCollapsed', isCollapsed ? '1' : '0');
+        if (topbarToggle) {
+            topbarToggle.querySelector('i').className = isCollapsed
+                ? 'fa-solid fa-bars'
+                : 'fa-solid fa-bars';
         }
     }
 
-    // Restore sidebar state
-    if (window.innerWidth > 768 && localStorage.getItem('sidebarCollapsed') === '1') {
+    function toggleSidebar() {
+        if (isMobile()) {
+            sidebar?.classList.contains('mobile-open') ? closeMobileSidebar() : openMobileSidebar();
+        } else {
+            toggleDesktopSidebar();
+        }
+    }
+
+    // Restore sidebar state on desktop
+    if (!isMobile() && localStorage.getItem('sidebarCollapsed') === '1') {
         sidebar?.classList.add('collapsed');
         mainWrapper?.classList.add('collapsed');
     }
 
-    sidebarToggle?.addEventListener('click', toggleSidebar);
     topbarToggle?.addEventListener('click', toggleSidebar);
 
-    // Close sidebar on mobile overlay click
-    document.addEventListener('click', (e) => {
-        if (window.innerWidth <= 768 &&
-            sidebar?.classList.contains('mobile-open') &&
-            !sidebar.contains(e.target) &&
-            !topbarToggle?.contains(e.target)) {
-            sidebar.classList.remove('mobile-open');
+    // Close on backdrop click
+    backdrop.addEventListener('click', closeMobileSidebar);
+
+    // Close mobile sidebar when a nav link is clicked
+    sidebar?.querySelectorAll('.nav-link').forEach(link => {
+        link.addEventListener('click', () => {
+            if (isMobile()) closeMobileSidebar();
+        });
+    });
+
+    // Handle window resize
+    window.addEventListener('resize', () => {
+        if (!isMobile()) {
+            closeMobileSidebar();
+            document.body.style.overflow = '';
+            // Restore desktop collapse state
+            if (localStorage.getItem('sidebarCollapsed') === '1') {
+                sidebar?.classList.add('collapsed');
+                mainWrapper?.classList.add('collapsed');
+            }
         }
     });
+
+    // ── Swipe-to-close on mobile ──
+    let touchStartX = 0;
+    document.addEventListener('touchstart', (e) => { touchStartX = e.touches[0].clientX; }, { passive: true });
+    document.addEventListener('touchend', (e) => {
+        if (!isMobile()) return;
+        const dx = touchStartX - e.changedTouches[0].clientX;
+        if (dx > 60 && sidebar?.classList.contains('mobile-open')) {
+            closeMobileSidebar(); // swipe left to close
+        }
+        if (dx < -60 && !sidebar?.classList.contains('mobile-open') && touchStartX < 30) {
+            openMobileSidebar(); // swipe right from left edge to open
+        }
+    }, { passive: true });
 
     // ──────────── MODALS ────────────
     // Open modal

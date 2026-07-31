@@ -43,15 +43,6 @@ $roleLabel  = ucfirst($_SESSION['user_role']);
 
 <!-- ===== SIDEBAR ===== -->
 <aside class="sidebar" id="sidebar">
-    <div class="sidebar-header">
-        <div class="sidebar-logo">
-            <i class="fa-solid fa-palette"></i>
-            <span><?= APP_NAME ?></span>
-        </div>
-        <button class="sidebar-toggle-btn" id="sidebarToggle" aria-label="Toggle sidebar">
-            <i class="fa-solid fa-bars"></i>
-        </button>
-    </div>
 
     <div class="sidebar-user">
         <div class="sidebar-avatar" style="background: <?= $roleColor ?>20; border: 2px solid <?= $roleColor ?>;">
@@ -93,6 +84,11 @@ $roleLabel  = ucfirst($_SESSION['user_role']);
         <button class="topbar-toggle" id="topbarToggle" aria-label="Toggle menu">
             <i class="fa-solid fa-bars"></i>
         </button>
+        <div class="topbar-logo">
+            <i class="fa-solid fa-palette"></i>
+            <span><?= APP_NAME ?></span>
+        </div>
+        <div class="topbar-divider"></div>
         <div class="topbar-title">
             <?= isset($pageTitle) ? explode(' | ', $pageTitle)[0] : APP_NAME ?>
         </div>

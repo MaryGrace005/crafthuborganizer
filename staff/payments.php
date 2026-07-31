@@ -118,17 +118,17 @@ $bookings = $stmt->fetchAll();
                         <td><?= statusBadge($b['status']) ?></td>
                         <td><?= statusBadge($payStatus) ?></td>
                         <td>
-                            <div style="display:flex;gap:6px;align-items:center;">
-                                <a href="<?= APP_URL ?>/booking_images.php?booking_id=<?= $b['id'] ?>" class="btn btn-secondary btn-sm" title="View Event Photos &amp; Attachments">
+                            <div style="display:flex;gap:6px;align-items:center;flex-wrap:nowrap;">
+                                <a href="<?= APP_URL ?>/booking_images.php?booking_id=<?= $b['id'] ?>" class="btn btn-secondary btn-sm" style="white-space:nowrap;" title="View Event Photos &amp; Attachments">
                                     <i class="fa-solid fa-camera"></i> Photos
                                 </a>
                                 <?php if ($payStatus !== 'paid'): ?>
                                     <a href="<?= APP_URL ?>/staff/process_payment.php?id=<?= $b['id'] ?>"
-                                       class="btn btn-success btn-sm">
+                                       class="btn btn-success btn-sm" style="white-space:nowrap;">
                                         <i class="fa-solid fa-money-bill"></i> Collect Payment
                                     </a>
                                 <?php else: ?>
-                                    <span class="badge badge-success"><i class="fa-solid fa-check"></i> Fully Paid</span>
+                                    <span class="badge badge-success" style="white-space:nowrap;"><i class="fa-solid fa-check"></i> Fully Paid</span>
                                 <?php endif; ?>
                             </div>
                         </td>

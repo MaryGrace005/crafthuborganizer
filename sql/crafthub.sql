@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
     password VARCHAR(255) NOT NULL,
     contact_no VARCHAR(20),
     address TEXT,
-    ip_address VARCHAR(45) UNIQUE NULL,                    -- Strict 1 IP per Customer account rule
+    ip_address VARCHAR(45) NULL,                           -- Locked device IP per Customer account rule
     role ENUM('customer','staff','cashier','admin') DEFAULT 'customer',
     security_question VARCHAR(255),
     security_answer_hash VARCHAR(255),
