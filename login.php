@@ -17,11 +17,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'Please enter both email and password.';
     } else {
         $db   = getDB();
-        $stmt = $db->prepare("SELECT *, user_id AS id FROM users WHERE email = ? AND status = 'active' LIMIT 1");
+        $stmt = $db->prepare("SELECT *, user_id AS id FROM users WHERE email = ? LIMIT 1");
         $stmt->execute([$email]);
         $user = $stmt->fetch();
 
         if ($user && password_verify($password, $user['password'])) {
+
+            // Check Account Approval Status
+            if ($user['status'] !== 'active') {
+                $error = 'Account Pending Approval: Your account was created by staff and is currently awaiting Admin approval. Please contact the administrator.';
+                logAudit(0, 'PENDING_LOGIN', 'Login attempt for unapproved user: ' . $email, 'users');
+                goto end_login;
+            }
 
             // ── IP Enforcement for Customer Accounts ──────────────────────
             if ($user['role'] === 'customer') {

@@ -19,11 +19,12 @@ if ($_SESSION['user_role'] === 'admin') {
         ['href' => APP_URL . '/admin/reports.php',     'icon' => 'fa-chart-bar',   'label' => 'Reports'],
         ['href' => APP_URL . '/admin/audit.php',       'icon' => 'fa-shield-halved','label' => 'Audit Log'],
     ];
-} elseif ($_SESSION['user_role'] === 'cashier') {
+} elseif ($_SESSION['user_role'] === 'staff' || $_SESSION['user_role'] === 'cashier') {
     $navLinks = [
-        ['href' => APP_URL . '/cashier/dashboard.php',       'icon' => 'fa-gauge',       'label' => 'Dashboard'],
-        ['href' => APP_URL . '/cashier/payments.php',        'icon' => 'fa-money-bill-wave','label' => 'Payments'],
-        ['href' => APP_URL . '/cashier/collection.php',      'icon' => 'fa-receipt',     'label' => 'Collection'],
+        ['href' => APP_URL . '/staff/dashboard.php',       'icon' => 'fa-gauge',          'label' => 'Dashboard'],
+        ['href' => APP_URL . '/staff/customers.php',       'icon' => 'fa-user-plus',      'label' => 'Register Customer'],
+        ['href' => APP_URL . '/staff/payments.php',        'icon' => 'fa-money-bill-wave','label' => 'Payments'],
+        ['href' => APP_URL . '/staff/collection.php',      'icon' => 'fa-receipt',        'label' => 'Collection'],
     ];
 } elseif ($_SESSION['user_role'] === 'customer') {
     $navLinks = [
@@ -35,7 +36,7 @@ if ($_SESSION['user_role'] === 'admin') {
     ];
 }
 
-$roleColors = ['admin' => '#e94560', 'cashier' => '#f5a623', 'customer' => '#4ecdc4'];
+$roleColors = ['admin' => '#e94560', 'staff' => '#f5a623', 'cashier' => '#f5a623', 'customer' => '#4ecdc4'];
 $roleColor  = $roleColors[$_SESSION['user_role']] ?? '#e94560';
 $roleLabel  = ucfirst($_SESSION['user_role']);
 ?>

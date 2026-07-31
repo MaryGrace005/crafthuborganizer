@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
     contact_no VARCHAR(20),
     address TEXT,
     ip_address VARCHAR(45) UNIQUE NULL,                    -- Strict 1 IP per Customer account rule
-    role ENUM('customer','cashier','admin') DEFAULT 'customer',
+    role ENUM('customer','staff','cashier','admin') DEFAULT 'customer',
     security_question VARCHAR(255),
     security_answer_hash VARCHAR(255),
     status ENUM('active','inactive') DEFAULT 'active',

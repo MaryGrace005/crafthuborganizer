@@ -147,10 +147,207 @@ unset($p);
         <h1>Packages</h1>
         <p>Manage craft event packages, sample images, and included details</p>
     </div>
-    <button class="btn btn-primary" data-modal="addPackageModal">
+    <button class="btn btn-primary btn-add-package" data-modal="addPackageModal">
         <i class="fa-solid fa-plus"></i> Add Package
     </button>
 </div>
+
+<style>
+/* ── Add Package CTA ── */
+.btn-add-package {
+    padding: 13px 28px;
+    font-size: 0.95rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    background: linear-gradient(135deg, #e94560 0%, #c0392b 60%, #a93226 100%);
+    border-radius: 14px;
+    box-shadow:
+        0 6px 24px rgba(233,69,96,0.5),
+        0 0 0 0 rgba(233,69,96,0.4);
+    animation: pulse-ring 2.4s cubic-bezier(0.4,0,0.6,1) infinite;
+    border: 1px solid rgba(255,255,255,0.15);
+    transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
+}
+.btn-add-package:hover {
+    transform: translateY(-4px) scale(1.04);
+    box-shadow:
+        0 14px 36px rgba(233,69,96,0.65),
+        0 0 0 4px rgba(233,69,96,0.18);
+    animation: none;
+}
+.btn-add-package i {
+    background: rgba(255,255,255,0.25);
+    border-radius: 50%;
+    width: 22px; height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.82rem;
+    transition: transform 0.3s ease;
+}
+.btn-add-package:hover i { transform: rotate(90deg); }
+
+@keyframes pulse-ring {
+    0%,100% { box-shadow: 0 6px 24px rgba(233,69,96,0.5), 0 0 0 0 rgba(233,69,96,0.35); }
+    50%      { box-shadow: 0 6px 24px rgba(233,69,96,0.5), 0 0 0 8px rgba(233,69,96,0); }
+}
+
+/* ── Action buttons in table ── */
+.pkg-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* ── Slots chip ── */
+.slots-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px 6px 8px;
+    background: linear-gradient(135deg, rgba(78,205,196,0.12) 0%, rgba(26,158,150,0.08) 100%);
+    border: 1px solid rgba(78,205,196,0.28);
+    border-radius: 30px;
+    font-family: 'Outfit', sans-serif;
+    font-weight: 700;
+    font-size: 0.82rem;
+    color: var(--accent-teal);
+    white-space: nowrap;
+    box-shadow: 0 0 12px rgba(78,205,196,0.08), inset 0 1px 0 rgba(255,255,255,0.06);
+    transition: all 0.28s cubic-bezier(0.4,0,0.2,1);
+    cursor: default;
+}
+.slots-chip:hover {
+    background: linear-gradient(135deg, rgba(78,205,196,0.2) 0%, rgba(26,158,150,0.14) 100%);
+    border-color: rgba(78,205,196,0.5);
+    box-shadow: 0 4px 16px rgba(78,205,196,0.25);
+    transform: translateY(-1px);
+}
+.slots-icon {
+    width: 22px; height: 22px;
+    background: rgba(78,205,196,0.18);
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.72rem;
+    flex-shrink: 0;
+}
+.slots-count {
+    font-size: 1rem;
+    font-weight: 800;
+    color: #fff;
+    line-height: 1;
+}
+.slots-label {
+    font-size: 0.74rem;
+    font-weight: 600;
+    color: var(--accent-teal);
+    opacity: 0.85;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+/* ── Price chip ── */
+.price-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 14px 6px 6px;
+    background: linear-gradient(135deg, rgba(245,166,35,0.12) 0%, rgba(230,126,34,0.07) 100%);
+    border: 1px solid rgba(245,166,35,0.3);
+    border-radius: 30px;
+    font-family: 'Outfit', sans-serif;
+    white-space: nowrap;
+    box-shadow: 0 0 14px rgba(245,166,35,0.08), inset 0 1px 0 rgba(255,255,255,0.06);
+    transition: all 0.28s cubic-bezier(0.4,0,0.2,1);
+    cursor: default;
+}
+.price-chip:hover {
+    background: linear-gradient(135deg, rgba(245,166,35,0.22) 0%, rgba(230,126,34,0.14) 100%);
+    border-color: rgba(245,166,35,0.55);
+    box-shadow: 0 4px 18px rgba(245,166,35,0.28);
+    transform: translateY(-1px);
+}
+.price-currency {
+    width: 22px; height: 22px;
+    background: rgba(245,166,35,0.2);
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.78rem;
+    font-weight: 800;
+    color: var(--accent-gold);
+    flex-shrink: 0;
+    line-height: 1;
+}
+.price-amount {
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: #fff;
+    line-height: 1;
+    letter-spacing: 0.01em;
+}
+
+.btn-edit-pkg {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    font-family: 'Outfit', sans-serif;
+    border-radius: 10px;
+    border: 1px solid rgba(245,166,35,0.35);
+    background: linear-gradient(135deg, #f5a623 0%, #e67e22 100%);
+    color: #fff;
+    box-shadow: 0 3px 12px rgba(245,166,35,0.4), inset 0 1px 0 rgba(255,255,255,0.2);
+    cursor: pointer;
+    transition: all 0.28s cubic-bezier(0.4,0,0.2,1);
+    white-space: nowrap;
+    position: relative;
+    overflow: hidden;
+}
+.btn-edit-pkg::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(105deg, transparent 40%, rgba(255,255,255,0.15) 50%, transparent 60%);
+    background-size: 200% 100%;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+.btn-edit-pkg:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 22px rgba(245,166,35,0.55), inset 0 1px 0 rgba(255,255,255,0.2);
+    background: linear-gradient(135deg, #ffc04a 0%, #f08c2e 100%);
+}
+.btn-edit-pkg:hover::after { opacity: 1; animation: btn-shimmer 0.55s ease; }
+.btn-edit-pkg:active { transform: translateY(0) scale(0.97); }
+
+.btn-deactivate-pkg {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px; height: 34px;
+    border-radius: 10px;
+    border: 1px solid rgba(192,57,43,0.35);
+    background: linear-gradient(135deg, rgba(192,57,43,0.2) 0%, rgba(120,36,28,0.3) 100%);
+    color: #e94560;
+    font-size: 0.88rem;
+    cursor: pointer;
+    transition: all 0.28s cubic-bezier(0.4,0,0.2,1);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+}
+.btn-deactivate-pkg:hover {
+    background: linear-gradient(135deg, #c0392b 0%, #7b241c 100%);
+    color: #fff;
+    border-color: rgba(192,57,43,0.6);
+    transform: translateY(-3px);
+    box-shadow: 0 6px 18px rgba(192,57,43,0.5), inset 0 1px 0 rgba(255,255,255,0.1);
+}
+.btn-deactivate-pkg:active { transform: scale(0.95); }
+</style>
 
 <?php displayFlash(); ?>
 
@@ -193,11 +390,18 @@ unset($p);
                         <div style="font-size:0.78rem;color:var(--text-secondary);"><?= htmlspecialchars(substr($p['description'] ?? '',0,50)) ?><?= strlen($p['description'] ?? '') > 50 ? '...' : '' ?></div>
                     </td>
                     <td><span class="badge badge-info"><?= htmlspecialchars($p['event_type'] ?? 'Wedding') ?></span></td>
-                    <td style="color:var(--accent-gold);font-weight:700;"><?= formatCurrency($p['price']) ?></td>
                     <td>
-                        <span class="badge badge-secondary" style="font-weight:600;">
-                            <i class="fa-solid fa-users"></i> <?= (int)$p['max_slots'] ?> slots
-                        </span>
+                        <div class="price-chip">
+                            <span class="price-currency">₱</span>
+                            <span class="price-amount"><?= number_format((float)$p['price'], 0, '.', ',') ?></span>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="slots-chip">
+                            <span class="slots-icon"><i class="fa-solid fa-users"></i></span>
+                            <span class="slots-count"><?= (int)$p['max_slots'] ?></span>
+                            <span class="slots-label">Slots</span>
+                        </div>
                     </td>
                     <td>
                         <?php if (!empty($p['components_list'])): ?>
@@ -215,28 +419,30 @@ unset($p);
                     <td><span class="badge badge-secondary"><?= $p['booking_count'] ?></span></td>
                     <td><?= statusBadge($p['status']) ?></td>
                     <td>
-                        <button class="btn btn-warning btn-sm"
-                            data-modal="editPackageModal"
-                            data-edit='<?= json_encode([
-                                'id'          => $p['id'],
-                                'name'        => $p['name'],
-                                'event_type'  => $p['event_type'] ?? 'Wedding',
-                                'price'       => $p['price'],
-                                'max_slots'   => $p['max_slots'],
-                                'image_url'   => $p['image_url'] ?? '',
-                                'description' => $p['description'],
-                                'status'      => $p['status'],
-                                'inclusions'  => $p['inclusions_text']
-                            ], JSON_HEX_APOS | JSON_HEX_QUOT) ?>'>
-                            <i class="fa-solid fa-pen"></i> Edit
-                        </button>
-                        <form method="POST" style="display:inline;">
-                            <input type="hidden" name="action" value="delete">
-                            <input type="hidden" name="id" value="<?= $p['id'] ?>">
-                            <button type="submit" class="btn btn-danger btn-sm" data-confirm="Deactivate this package?">
-                                <i class="fa-solid fa-ban"></i>
+                        <div class="pkg-actions">
+                            <button class="btn-edit-pkg"
+                                data-modal="editPackageModal"
+                                data-edit='<?= json_encode([
+                                    'id'          => $p['id'],
+                                    'name'        => $p['name'],
+                                    'event_type'  => $p['event_type'] ?? 'Wedding',
+                                    'price'       => $p['price'],
+                                    'max_slots'   => $p['max_slots'],
+                                    'image_url'   => $p['image_url'] ?? '',
+                                    'description' => $p['description'],
+                                    'status'      => $p['status'],
+                                    'inclusions'  => $p['inclusions_text']
+                                ], JSON_HEX_APOS | JSON_HEX_QUOT) ?>'>
+                                <i class="fa-solid fa-pen-to-square"></i> Edit
                             </button>
-                        </form>
+                            <form method="POST" style="display:inline;margin:0;">
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="id" value="<?= $p['id'] ?>">
+                                <button type="submit" class="btn-deactivate-pkg" data-confirm="Deactivate this package?" title="Deactivate">
+                                    <i class="fa-solid fa-ban"></i>
+                                </button>
+                            </form>
+                        </div>
                     </td>
                 </tr>
                 <?php endforeach; ?>

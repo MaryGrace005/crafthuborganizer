@@ -215,7 +215,7 @@ function getDashboardStats(string $role, int $userId = 0): array {
         $stats['total_revenue']   = $db->query("SELECT COALESCE(SUM(amount_paid),0) FROM payments")->fetchColumn();
         $stats['pending_bookings']= $db->query("SELECT COUNT(*) FROM bookings WHERE status = 'Pending'")->fetchColumn();
         $stats['total_venues']    = $db->query("SELECT COUNT(*) FROM venues WHERE availability_status = 'available'")->fetchColumn();
-    } elseif ($role === 'cashier') {
+    } elseif ($role === 'staff' || $role === 'cashier') {
         $stats['pending_payments']= $db->query("SELECT COUNT(*) FROM bookings WHERE status NOT IN ('Paid','Cancelled')")->fetchColumn();
         $stats['total_collected'] = $db->prepare("SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE cashier_id = ?");
         $stats['total_collected']->execute([$userId]);

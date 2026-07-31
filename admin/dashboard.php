@@ -5,6 +5,16 @@ requireRole(['admin']);
 
 $stats = getDashboardStats('admin');
 $db    = getDB();
+$adminId = $_SESSION['user_id'] ?? 0;
+
+// Handle POST Approve directly from dashboard
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'approve') {
+    $uid = (int)($_POST['user_id'] ?? 0);
+    $db->prepare("UPDATE users SET status = 'active' WHERE user_id = ?")->execute([$uid]);
+    logAudit($adminId, 'APPROVE_USER', "Admin approved customer account #{$uid} from dashboard", 'users');
+    setFlash('success', 'Customer account approved and activated successfully!');
+    redirect(APP_URL . '/admin/dashboard.php');
+}
 
 // Recent bookings
 $recent = $db->query("
@@ -25,6 +35,10 @@ $revenueStmt = $db->query("
     GROUP BY y, m ORDER BY y, m
 ");
 $revenueData = $revenueStmt->fetchAll();
+
+// Pending user account approvals
+$pendingUsers = $db->query("SELECT * FROM users WHERE status = 'inactive' AND role = 'customer' ORDER BY created_at DESC")->fetchAll();
+$pendingAccountsCount = count($pendingUsers);
 ?>
 
 <?php require_once __DIR__ . '/../includes/navbar.php'; ?>
@@ -36,6 +50,50 @@ $revenueData = $revenueStmt->fetchAll();
     </div>
     <div style="font-size:0.9rem;color:var(--text-secondary);"><?= date('l, F j, Y') ?></div>
 </div>
+
+<?php displayFlash(); ?>
+
+<?php if ($pendingAccountsCount > 0): ?>
+<div class="card" style="border:1px solid rgba(245,166,35,0.4);margin-bottom:24px;background:rgba(245,166,35,0.04);">
+    <div class="card-header" style="border-bottom:1px solid rgba(245,166,35,0.2);">
+        <h2 class="card-title" style="color:var(--accent-gold);"><i class="fa-solid fa-user-clock"></i> <?= $pendingAccountsCount ?> Customer Account<?= $pendingAccountsCount > 1 ? 's' : '' ?> Awaiting Admin Approval</h2>
+        <a href="<?= APP_URL ?>/admin/users.php?role=pending" class="btn btn-warning btn-sm">View All in Manage Users</a>
+    </div>
+    <div class="table-wrapper">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Customer Name</th>
+                    <th>Email Address</th>
+                    <th>Phone</th>
+                    <th>Registered Date</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($pendingUsers as $pu): ?>
+                <tr>
+                    <td><strong style="color:#fff;"><?= htmlspecialchars($pu['name']) ?></strong></td>
+                    <td><?= htmlspecialchars($pu['email']) ?></td>
+                    <td><?= htmlspecialchars($pu['contact_no'] ?? '—') ?></td>
+                    <td style="font-size:0.82rem;color:var(--text-secondary);"><?= formatDate($pu['created_at']) ?></td>
+                    <td>
+                        <form method="POST" style="display:inline;margin:0;">
+                            <input type="hidden" name="action" value="approve">
+                            <input type="hidden" name="user_id" value="<?= $pu['user_id'] ?>">
+                            <button type="submit" class="btn btn-success btn-sm" title="Approve Account"
+                                    data-confirm="Approve and activate customer account for <?= htmlspecialchars($pu['name']) ?>?">
+                                <i class="fa-solid fa-check"></i> Approve &amp; Activate
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+<?php endif; ?>
 
 <!-- Stats -->
 <div class="stats-grid">
@@ -63,7 +121,7 @@ $revenueData = $revenueStmt->fetchAll();
     <div class="stat-card" style="--stat-color:#27ae60;">
         <div class="stat-icon" style="background:rgba(39,174,96,0.2);color:#27ae60;"><i class="fa-solid fa-peso-sign"></i></div>
         <div class="stat-info">
-            <div class="stat-value" style="font-size:1.2rem;"><?= formatCurrency($stats['total_revenue']) ?></div>
+            <div class="stat-value"><?= formatCurrency($stats['total_revenue']) ?></div>
             <div class="stat-label">Total Revenue</div>
         </div>
     </div>

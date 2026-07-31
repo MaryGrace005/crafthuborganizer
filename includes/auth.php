@@ -29,6 +29,14 @@ function requireLogin(): void {
 // -----------------------------------------------
 function requireRole(array $roles): void {
     requireLogin();
+    // Auto-map legacy cashier session role to staff
+    if (($_SESSION['user_role'] ?? '') === 'cashier') {
+        $_SESSION['user_role'] = 'staff';
+    }
+    // Allow cashier if staff is required or vice versa
+    if (in_array('staff', $roles) && !in_array('cashier', $roles)) {
+        $roles[] = 'cashier';
+    }
     if (!in_array($_SESSION['user_role'], $roles, true)) {
         setFlash('error', 'You do not have permission to access that page.');
         redirectByRole($_SESSION['user_role']);
@@ -52,7 +60,8 @@ function getCurrentUser(): ?array {
 function redirectByRole(string $role): void {
     $routes = [
         'admin'   => APP_URL . '/admin/dashboard.php',
-        'cashier' => APP_URL . '/cashier/dashboard.php',
+        'staff'   => APP_URL . '/staff/dashboard.php',
+        'cashier' => APP_URL . '/staff/dashboard.php',
         'customer'=> APP_URL . '/customer/dashboard.php',
     ];
     redirect($routes[$role] ?? APP_URL . '/login.php');
@@ -65,7 +74,7 @@ function loginUser(array $user): void {
     $_SESSION['user_id']    = $user['user_id'] ?? $user['id'];
     $_SESSION['user_name']  = $user['name'];
     $_SESSION['user_email'] = $user['email'];
-    $_SESSION['user_role']  = $user['role'];
+    $_SESSION['user_role']  = ($user['role'] === 'cashier') ? 'staff' : $user['role'];
     session_regenerate_id(true);
 }
 

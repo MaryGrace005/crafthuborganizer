@@ -20,7 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $phone    = sanitize($_POST['phone']    ?? '');
         $address  = sanitize($_POST['address']  ?? '');
         $tempPass = $_POST['password']          ?? '';
-        $role     = in_array($_POST['role'] ?? '', ['customer','cashier','admin']) ? $_POST['role'] : 'customer';
+        $role     = in_array($_POST['role'] ?? '', ['customer','staff','cashier','admin']) ? $_POST['role'] : 'customer';
         $errors   = [];
 
         if (!$firstName) $errors[] = 'First name is required.';
@@ -44,6 +44,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             setFlash('error', implode(' ', $errors));
         }
+        redirect(APP_URL . '/admin/users.php');
+    }
+
+    // APPROVE customer account (created by staff/cashier)
+    if ($action === 'approve') {
+        $uid = (int)($_POST['user_id'] ?? 0);
+        $db->prepare("UPDATE users SET status = 'active' WHERE user_id = ?")->execute([$uid]);
+        logAudit($adminId, 'APPROVE_USER', "Admin approved customer account #{$uid}", 'users');
+        setFlash('success', 'Customer account approved and activated successfully!');
         redirect(APP_URL . '/admin/users.php');
     }
 
@@ -77,12 +86,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // ── Fetch Users ─────────────────────────────────────────────────────────────
 $roleFilter = sanitize($_GET['role'] ?? 'all');
-$allowed = ['all','customer','cashier','admin'];
+$allowed = ['all','pending','customer','staff','cashier','admin'];
 if (!in_array($roleFilter, $allowed)) $roleFilter = 'all';
 
+$pendingCount = (int)$db->query("SELECT COUNT(*) FROM users WHERE status = 'inactive' AND role = 'customer'")->fetchColumn();
+
 $sql = "SELECT * FROM users";
-if ($roleFilter !== 'all') $sql .= " WHERE role = " . $db->quote($roleFilter);
-$sql .= " ORDER BY FIELD(role,'admin','cashier','customer'), created_at DESC";
+if ($roleFilter === 'pending') {
+    $sql .= " WHERE status = 'inactive' AND role = 'customer'";
+} elseif ($roleFilter !== 'all') {
+    $sql .= " WHERE role = " . $db->quote($roleFilter);
+}
+$sql .= " ORDER BY (status = 'inactive') DESC, FIELD(role,'admin','staff','cashier','customer'), created_at DESC";
 $users = $db->query($sql)->fetchAll();
 ?>
 
@@ -91,7 +106,7 @@ $users = $db->query($sql)->fetchAll();
 <div class="page-header">
     <div>
         <h1>Manage Users</h1>
-        <p>Create and manage customer, cashier, and admin accounts</p>
+        <p>Create and manage customer, staff, and admin accounts</p>
     </div>
     <button class="btn btn-primary" data-modal="createUserModal">
         <i class="fa-solid fa-user-plus"></i> Create Account
@@ -100,9 +115,24 @@ $users = $db->query($sql)->fetchAll();
 
 <!-- Filter Tabs -->
 <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">
-    <?php foreach ($allowed as $r): ?>
-        <a href="?role=<?= $r ?>" class="btn btn-sm <?= $roleFilter === $r ? 'btn-primary' : 'btn-secondary' ?>">
-            <?= ucfirst($r) ?>
+    <?php 
+    $labels = [
+        'all'      => 'All Users',
+        'pending'  => 'Pending Approval' . ($pendingCount > 0 ? " ({$pendingCount})" : ''),
+        'customer' => 'Customers',
+        'staff'    => 'Staff',
+        'cashier'  => 'Cashiers / Staff',
+        'admin'    => 'Admins'
+    ];
+    foreach ($allowed as $r):
+        $active = ($roleFilter === $r);
+        $btnClass = $active ? 'btn-primary' : ($r === 'pending' && $pendingCount > 0 ? 'btn-warning' : 'btn-secondary');
+    ?>
+        <a href="?role=<?= $r ?>" class="btn btn-sm <?= $btnClass ?>">
+            <?php if ($r === 'pending' && $pendingCount > 0): ?>
+                <i class="fa-solid fa-bell"></i>
+            <?php endif; ?>
+            <?= $labels[$r] ?>
         </a>
     <?php endforeach; ?>
 </div>
@@ -127,7 +157,7 @@ $users = $db->query($sql)->fetchAll();
             </thead>
             <tbody>
                 <?php foreach ($users as $u): ?>
-                <tr>
+                <tr style="<?= $u['status'] === 'inactive' ? 'background:rgba(245,166,35,0.04);' : '' ?>">
                     <td><?= $u['user_id'] ?></td>
                     <td>
                         <div style="font-weight:600;"><?= htmlspecialchars($u['name']) ?></div>
@@ -139,7 +169,7 @@ $users = $db->query($sql)->fetchAll();
                     <td><?= htmlspecialchars($u['contact_no'] ?? '—') ?></td>
                     <td>
                         <?php
-                        $roleColors = ['admin'=>'danger','cashier'=>'warning','customer'=>'info'];
+                        $roleColors = ['admin'=>'danger','staff'=>'warning','cashier'=>'warning','customer'=>'info'];
                         $rc = $roleColors[$u['role']] ?? 'secondary';
                         ?>
                         <span class="badge badge-<?= $rc ?>"><?= ucfirst($u['role']) ?></span>
@@ -164,29 +194,48 @@ $users = $db->query($sql)->fetchAll();
                         <?php endif; ?>
                     </td>
                     <td>
-                        <form method="POST" style="display:inline;">
-                            <input type="hidden" name="action" value="toggle_status">
-                            <input type="hidden" name="user_id" value="<?= $u['user_id'] ?>">
-                            <button type="submit" class="badge badge-<?= $u['status'] === 'active' ? 'success' : 'danger' ?>"
-                                    style="border:none;cursor:pointer;background:none;padding:0;">
-                                <?= statusBadge($u['status']) ?>
-                            </button>
-                        </form>
+                        <?php if ($u['status'] === 'inactive'): ?>
+                            <span class="badge badge-warning" style="display:inline-flex;align-items:center;gap:4px;background:rgba(245,166,35,0.18);color:#f5a623;border:1px solid rgba(245,166,35,0.35);">
+                                <i class="fa-solid fa-clock"></i> Pending Approval
+                            </span>
+                        <?php else: ?>
+                            <form method="POST" style="display:inline;">
+                                <input type="hidden" name="action" value="toggle_status">
+                                <input type="hidden" name="user_id" value="<?= $u['user_id'] ?>">
+                                <button type="submit" class="badge badge-success"
+                                        style="border:none;cursor:pointer;background:none;padding:0;">
+                                    <?= statusBadge('active') ?>
+                                </button>
+                            </form>
+                        <?php endif; ?>
                     </td>
                     <td style="font-size:0.82rem;"><?= formatDate($u['created_at']) ?></td>
                     <td>
-                        <?php if ($u['user_id'] !== (int)$adminId): ?>
-                        <form method="POST" style="display:inline;">
-                            <input type="hidden" name="action" value="delete">
-                            <input type="hidden" name="user_id" value="<?= $u['user_id'] ?>">
-                            <button type="submit" class="btn btn-danger btn-sm"
-                                    data-confirm="Delete account for <?= htmlspecialchars($u['name']) ?>? This cannot be undone.">
-                                <i class="fa-solid fa-trash"></i>
-                            </button>
-                        </form>
-                        <?php else: ?>
-                            <span style="color:var(--text-muted);font-size:0.78rem;">You</span>
-                        <?php endif; ?>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <?php if ($u['status'] === 'inactive'): ?>
+                                <form method="POST" style="display:inline;margin:0;">
+                                    <input type="hidden" name="action" value="approve">
+                                    <input type="hidden" name="user_id" value="<?= $u['user_id'] ?>">
+                                    <button type="submit" class="btn btn-success btn-sm" title="Approve Customer Account"
+                                            data-confirm="Approve and activate customer account for <?= htmlspecialchars($u['name']) ?>?">
+                                        <i class="fa-solid fa-check"></i> Approve
+                                    </button>
+                                </form>
+                            <?php endif; ?>
+
+                            <?php if ($u['user_id'] !== (int)$adminId): ?>
+                                <form method="POST" style="display:inline;margin:0;">
+                                    <input type="hidden" name="action" value="delete">
+                                    <input type="hidden" name="user_id" value="<?= $u['user_id'] ?>">
+                                    <button type="submit" class="btn btn-danger btn-sm"
+                                            data-confirm="Delete account for <?= htmlspecialchars($u['name']) ?>? This cannot be undone.">
+                                        <i class="fa-solid fa-trash"></i>
+                                    </button>
+                                </form>
+                            <?php else: ?>
+                                <span style="color:var(--text-muted);font-size:0.78rem;">You</span>
+                            <?php endif; ?>
+                        </div>
                     </td>
                 </tr>
                 <?php endforeach; ?>
@@ -232,7 +281,7 @@ $users = $db->query($sql)->fetchAll();
                         <label class="form-label">Role</label>
                         <select name="role" class="form-control">
                             <option value="customer" selected>Customer</option>
-                            <option value="cashier">Cashier</option>
+                            <option value="staff">Staff</option>
                             <option value="admin">Admin</option>
                         </select>
                     </div>

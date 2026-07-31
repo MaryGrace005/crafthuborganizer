@@ -61,7 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 // Handle Delete Image POST
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete_image') {
     $imageId = (int)($_POST['image_id'] ?? 0);
-    $force   = in_array($user['role'], ['admin', 'cashier']);
+    $force   = in_array($user['role'], ['admin', 'staff', 'cashier']);
     $res     = deleteBookingImage($imageId, $userId, $force);
 
     if ($res['success']) {
@@ -90,8 +90,8 @@ $images = getBookingImages($bookingId, $isPublicOnly);
     <div style="display:flex;gap:10px;">
         <?php if ($user['role'] === 'admin'): ?>
             <a href="<?= APP_URL ?>/admin/bookings.php" class="btn btn-secondary"><i class="fa-solid fa-arrow-left"></i> Back to Bookings</a>
-        <?php elseif ($user['role'] === 'cashier'): ?>
-            <a href="<?= APP_URL ?>/cashier/payments.php" class="btn btn-secondary"><i class="fa-solid fa-arrow-left"></i> Back to Payments</a>
+        <?php elseif ($user['role'] === 'staff' || $user['role'] === 'cashier'): ?>
+            <a href="<?= APP_URL ?>/staff/payments.php" class="btn btn-secondary"><i class="fa-solid fa-arrow-left"></i> Back to Payments</a>
         <?php else: ?>
             <a href="<?= APP_URL ?>/customer/bookings.php" class="btn btn-secondary"><i class="fa-solid fa-arrow-left"></i> Back to My Bookings</a>
         <?php endif; ?>
@@ -228,7 +228,7 @@ $images = getBookingImages($bookingId, $isPublicOnly);
                     <label class="form-label">Caption / Note</label>
                     <input type="text" name="caption" class="form-control" placeholder="e.g., Table setup reference photo">
                 </div>
-                <?php if (in_array($user['role'], ['admin', 'cashier'])): ?>
+                <?php if (in_array($user['role'], ['admin', 'staff', 'cashier'])): ?>
                     <div class="form-group" style="display:flex;align-items:center;gap:8px;">
                         <input type="checkbox" name="is_public" id="is_public" value="1" checked>
                         <label for="is_public" style="margin:0;cursor:pointer;">Visible to Customer in their portal</label>
