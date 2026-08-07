@@ -2,6 +2,7 @@
 $pageTitle = 'Book a Package';
 require_once __DIR__ . '/../includes/header.php';
 requireRole(['customer']);
+requireApproved();
 
 $db         = getDB();
 $user       = getCurrentUser();
@@ -73,21 +74,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         try {
             $ins = $db->prepare("
-                INSERT INTO bookings (booking_reference, customer_id, package_id, venue_id, event_date, event_time, event_type, guest_count, total_amount, status, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?)
+                INSERT INTO bookings
+                    (booking_reference, customer_id, package_id, venue_id, event_date, event_time, event_type, guest_count, total_amount, status, notes)
+                VALUES
+                    (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?)
             ");
-            $ins->execute([$ref, $userId, $pkgId, $venueId, $eventDate, $eventTime, $eventType, $numGuests, $total, $notes]);
+            $ins->execute([
+                $ref,
+                $userId,
+                $pkgId,
+                $venueId,   // NULL is fine — column is now nullable in DB
+                $eventDate,
+                $eventTime,
+                $eventType,
+                $numGuests,
+                $total,
+                $notes
+            ]);
         } catch (PDOException $e) {
-            $ins = $db->prepare("
-                INSERT INTO bookings (customer_id, package_id, venue_id, event_date, event_type, guest_count, total_amount, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'Pending')
-            ");
-            $ins->execute([$userId, $pkgId, $venueId, $eventDate, $eventType, $numGuests, $total]);
+            $errors[] = 'Booking could not be saved: ' . $e->getMessage();
         }
 
-        logAudit($userId, 'BOOKING', "Created booking #{$ref} for package #{$pkgId}", 'bookings');
-        setFlash('success', "Booking submitted successfully! Please wait for confirmation.");
-        redirect(APP_URL . '/customer/bookings.php');
+        if (empty($errors)) {
+            logAudit($userId, 'BOOKING', "Created booking #{$ref} for package #{$pkgId}", 'bookings');
+            setFlash('success', "Booking submitted successfully! Please wait for confirmation.");
+            redirect(APP_URL . '/customer/bookings.php');
+        }
     }
 }
 ?>

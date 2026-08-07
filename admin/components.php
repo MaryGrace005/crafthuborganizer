@@ -60,11 +60,59 @@ $components = $db->query("
 
 <?php displayFlash(); ?>
 
+<!-- Component Category Filter Tabs -->
+<div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;align-items:center;">
+    <span style="font-size:0.85rem;color:var(--text-muted);font-weight:700;margin-right:4px;">
+        <i class="fa-solid fa-filter"></i> Category:
+    </span>
+    <button class="comp-filter-tab active" data-cat="all" onclick="filterComponents('all')">
+        <i class="fa-solid fa-border-all"></i> All Categories
+    </button>
+    <button class="comp-filter-tab" data-cat="venue" onclick="filterComponents('venue')">
+        🏛️ Venue &amp; Facilities
+    </button>
+    <button class="comp-filter-tab" data-cat="food" onclick="filterComponents('food')">
+        🍽️ Food &amp; Catering
+    </button>
+    <button class="comp-filter-tab" data-cat="photography" onclick="filterComponents('photography')">
+        📷 Photo &amp; Video
+    </button>
+    <button class="comp-filter-tab" data-cat="decoration" onclick="filterComponents('decoration')">
+        🎨 Decor &amp; Styling
+    </button>
+</div>
+
+<style>
+.comp-filter-tab {
+    padding: 7px 16px;
+    border-radius: 30px;
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    cursor: pointer;
+    transition: all 0.25s ease;
+}
+.comp-filter-tab:hover {
+    color: #fff;
+    background: rgba(255,255,255,0.1);
+    border-color: rgba(255,255,255,0.2);
+}
+.comp-filter-tab.active {
+    background: linear-gradient(135deg, #4ecdc4, #2b938b);
+    color: #0f0f1a;
+    border-color: var(--accent-teal);
+    box-shadow: 0 4px 14px rgba(78,205,196,0.35);
+}
+</style>
+
 <div class="card">
     <div class="search-bar">
         <div class="search-input-wrapper">
             <i class="fa-solid fa-search"></i>
-            <input type="text" class="form-control" placeholder="Search inclusions..." data-search-table="compTable">
+            <input type="text" id="compSearchInput" class="form-control" placeholder="Search inclusions by name, package, or details...">
         </div>
     </div>
     <div class="table-wrapper">
@@ -80,7 +128,7 @@ $components = $db->query("
             </thead>
             <tbody>
                 <?php foreach ($components as $c): ?>
-                <tr>
+                <tr class="comp-row" data-cat="<?= htmlspecialchars($c['category']) ?>">
                     <td>
                         <div style="font-weight:600;"><?= htmlspecialchars($c['name']) ?></div>
                     </td>
@@ -204,3 +252,30 @@ $components = $db->query("
 </div>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
+
+<script>
+let currentCompCat = 'all';
+
+function filterComponents(cat) {
+    currentCompCat = cat;
+    document.querySelectorAll('.comp-filter-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.cat === cat);
+    });
+    applyCompFilter();
+}
+
+function applyCompFilter() {
+    const q = (document.getElementById('compSearchInput').value || '').toLowerCase();
+    document.querySelectorAll('#compTable .comp-row').forEach(row => {
+        const rowCat = row.dataset.cat;
+        const rowText = row.textContent.toLowerCase();
+
+        const matchCat = (currentCompCat === 'all' || rowCat === currentCompCat);
+        const matchSearch = (!q || rowText.includes(q));
+
+        row.style.display = (matchCat && matchSearch) ? '' : 'none';
+    });
+}
+
+document.getElementById('compSearchInput').addEventListener('input', applyCompFilter);
+</script>

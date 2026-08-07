@@ -2,6 +2,7 @@
 $pageTitle = 'My Profile';
 require_once __DIR__ . '/../includes/header.php';
 requireRole(['customer']);
+requireApproved();
 
 $user   = getCurrentUser();
 $db     = getDB();
@@ -76,6 +77,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <?= strtoupper(substr($user['name'], 0, 1)) ?>
             </div>
             <div style="font-size:0.8rem;color:var(--text-muted);">Customer Account</div>
+            <?php if (!empty($user['id_code'])): ?>
+            <div style="display:inline-flex;align-items:center;gap:8px;margin-top:10px;padding:8px 16px;background:rgba(78,205,196,0.1);border:1px solid rgba(78,205,196,0.25);border-radius:20px;cursor:pointer;" onclick="navigator.clipboard.writeText('<?= htmlspecialchars($user['id_code']) ?>').then(()=>this.querySelector('span').textContent='Copied!')" title="Click to copy">
+                <i class="fa-solid fa-id-badge" style="color:#4ecdc4;"></i>
+                <code style="font-weight:800;color:#4ecdc4;font-size:0.95rem;letter-spacing:0.06em;"><?= htmlspecialchars($user['id_code']) ?></code>
+                <span style="font-size:0.72rem;color:rgba(255,255,255,0.4);">📍 Copy</span>
+            </div>
+            <?php endif; ?>
         </div>
 
         <form method="POST" action="">

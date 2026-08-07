@@ -24,9 +24,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($user && password_verify($password, $user['password'])) {
 
             // Check Account Approval Status
+            if ($user['status'] === 'pending_approval' || $user['status'] === 'inactive') {
+                // Allow login but redirect to the pending holding page
+                loginUser($user);
+                logAudit($user['user_id'] ?? $user['id'], 'PENDING_LOGIN', 'Pending user logged in: ' . $email, 'users');
+                redirect(APP_URL . '/pending.php');
+            }
+
+            if ($user['status'] === 'rejected') {
+                // Allow login so they can see the rejection message
+                loginUser($user);
+                logAudit($user['user_id'] ?? $user['id'], 'REJECTED_LOGIN', 'Rejected user logged in: ' . $email, 'users');
+                redirect(APP_URL . '/pending.php');
+            }
+
             if ($user['status'] !== 'active') {
-                $error = 'Account Pending Approval: Your account was created by staff and is currently awaiting Admin approval. Please contact the administrator.';
-                logAudit(0, 'PENDING_LOGIN', 'Login attempt for unapproved user: ' . $email, 'users');
+                $error = 'Your account is not active. Please contact the administrator.';
+                logAudit(0, 'BLOCKED_LOGIN', 'Login attempt for inactive user: ' . $email, 'users');
                 goto end_login;
             }
 
@@ -138,7 +152,7 @@ end_login:
 
             <p class="text-center mt-3" style="color:var(--text-secondary);font-size:0.9rem;">
                 Don't have an account?
-                <a href="<?= APP_URL ?>/register.php" class="auth-link">Create one</a>
+                <a href="<?= APP_URL ?>/signup.php" class="auth-link">Create one</a>
             </p>
 
         </div>

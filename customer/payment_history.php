@@ -2,6 +2,7 @@
 $pageTitle = 'Payment History';
 require_once __DIR__ . '/../includes/header.php';
 requireRole(['customer']);
+requireApproved();
 
 $user = getCurrentUser();
 $db   = getDB();
@@ -64,6 +65,7 @@ $totalPaid = $totalStmt->fetchColumn();
                         <th>Method</th>
                         <th>Processed By</th>
                         <th>Date</th>
+                        <th>Receipt</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -103,6 +105,11 @@ $totalPaid = $totalStmt->fetchColumn();
                         </td>
                         <td><?= htmlspecialchars($py['cashier_name']) ?></td>
                         <td><?= formatDateTime($py['payment_date']) ?></td>
+                        <td>
+                            <a href="<?= APP_URL ?>/receipt.php?id=<?= (int)$py['id'] ?>" target="_blank" class="btn btn-primary btn-sm">
+                                <i class="fa-solid fa-file-invoice"></i> View Receipt
+                            </a>
+                        </td>
                     </tr>
                     <?php endforeach; ?>
                 </tbody>

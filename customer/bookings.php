@@ -2,6 +2,7 @@
 $pageTitle = 'My Bookings';
 require_once __DIR__ . '/../includes/header.php';
 requireRole(['customer']);
+requireApproved();
 
 $user = getCurrentUser();
 $db   = getDB();

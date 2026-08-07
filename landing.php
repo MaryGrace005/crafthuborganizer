@@ -111,9 +111,9 @@ $pkgFeatured = [false, true, false]; // middle = featured
 
     <div class="nav-cta" id="nav-cta">
         <a href="<?= APP_URL ?>/login.php" class="btn-nav-login">Sign In</a>
-        <a href="<?= APP_URL ?>/register.php" class="btn-nav-register">
-            <i class="fa-solid fa-arrow-right-to-bracket"></i>
-            Get Started
+        <a href="<?= APP_URL ?>/signup.php" class="btn-nav-register">
+            <i class="fa-solid fa-user-plus"></i>
+            Create Account
         </a>
     </div>
 
@@ -172,13 +172,13 @@ $pkgFeatured = [false, true, false]; // middle = featured
         </p>
 
         <div class="hero-actions">
-            <a href="<?= APP_URL ?>/register.php" class="btn-hero-primary" id="hero-cta-register">
-                <i class="fa-solid fa-wand-magic-sparkles"></i>
-                Start for Free
+            <a href="<?= APP_URL ?>/signup.php" class="btn-hero-primary" id="hero-cta-register">
+                <i class="fa-solid fa-user-plus"></i>
+                Create Your Account
             </a>
-            <a href="#features" class="btn-hero-secondary" id="hero-cta-learn">
-                <i class="fa-solid fa-play"></i>
-                Learn More
+            <a href="<?= APP_URL ?>/login.php" class="btn-hero-secondary" id="hero-cta-login">
+                <i class="fa-solid fa-right-to-bracket"></i>
+                Sign In
             </a>
         </div>
 
@@ -496,28 +496,6 @@ $pkgFeatured = [false, true, false]; // middle = featured
     </div>
 </section>
 
-<!-- ══════════════════════════════════════
-     CTA SECTION
-══════════════════════════════════════ -->
-<section class="cta-section" id="cta">
-    <div class="cta-box reveal">
-        <div class="section-badge badge-red" style="display:inline-flex; margin-bottom:24px;">
-            <i class="fa-solid fa-rocket"></i> Get Started Today
-        </div>
-        <h2 class="cta-title">Ready to <span>Craft</span> Your<br>Perfect Event?</h2>
-        <p class="cta-subtitle">Join hundreds of satisfied customers already using CraftHub Organizer.<br>Sign up free — no credit card required.</p>
-        <div class="cta-buttons">
-            <a href="<?= APP_URL ?>/register.php" class="btn-hero-primary" id="cta-register">
-                <i class="fa-solid fa-wand-magic-sparkles"></i>
-                Create Free Account
-            </a>
-            <a href="<?= APP_URL ?>/login.php" class="btn-hero-secondary" id="cta-login">
-                <i class="fa-solid fa-right-to-bracket"></i>
-                I Already Have an Account
-            </a>
-        </div>
-    </div>
-</section>
 
 <!-- ══════════════════════════════════════
      FOOTER

@@ -36,23 +36,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (empty($errors)) {
             $hash = password_hash($tempPass, PASSWORD_DEFAULT);
             $db->prepare("INSERT INTO users (name, email, password, contact_no, address, role, status)
-                          VALUES (?, ?, ?, ?, ?, ?, 'active')")
+                          VALUES (?, ?, ?, ?, ?, ?, 'pending_approval')")
                ->execute([$name, $email, $hash, $phone, $address, $role]);
             $newId = (int)$db->lastInsertId();
-            logAudit($adminId, 'CREATE_USER', "Admin created {$role} account for {$email}", 'users');
-            setFlash('success', "Account for {$name} created successfully!");
+            logAudit($adminId, 'CREATE_USER', "Admin created {$role} account for {$email} (pending approval)", 'users');
+            setFlash('success', "Account for {$name} created and placed in Pending Approvals.");
         } else {
             setFlash('error', implode(' ', $errors));
         }
         redirect(APP_URL . '/admin/users.php');
     }
 
-    // APPROVE customer account (created by staff/cashier)
+    // APPROVE customer account
     if ($action === 'approve') {
         $uid = (int)($_POST['user_id'] ?? 0);
-        $db->prepare("UPDATE users SET status = 'active' WHERE user_id = ?")->execute([$uid]);
-        logAudit($adminId, 'APPROVE_USER', "Admin approved customer account #{$uid}", 'users');
-        setFlash('success', 'Customer account approved and activated successfully!');
+        $target = $db->prepare("SELECT * FROM users WHERE user_id = ? AND status IN ('pending_approval','inactive')");
+        $target->execute([$uid]);
+        $targetUser = $target->fetch();
+        if ($targetUser) {
+            $idCode = generateAccountIdCode();
+            $db->prepare("UPDATE users SET status = 'active', id_code = ? WHERE user_id = ?")
+               ->execute([$idCode, $uid]);
+            logAudit($adminId, 'APPROVE_USER', "Admin approved account #{$uid} → {$idCode}", 'users');
+            setFlash('success', "Account approved! Account ID: <strong>{$idCode}</strong>");
+        } else {
+            setFlash('error', 'Account not found or already approved.');
+        }
         redirect(APP_URL . '/admin/users.php');
     }
 
@@ -89,11 +98,11 @@ $roleFilter = sanitize($_GET['role'] ?? 'all');
 $allowed = ['all','pending','customer','staff','cashier','admin'];
 if (!in_array($roleFilter, $allowed)) $roleFilter = 'all';
 
-$pendingCount = (int)$db->query("SELECT COUNT(*) FROM users WHERE status = 'inactive' AND role = 'customer'")->fetchColumn();
+$pendingCount = (int)$db->query("SELECT COUNT(*) FROM users WHERE status IN ('pending_approval','inactive')")->fetchColumn();
 
 $sql = "SELECT * FROM users";
 if ($roleFilter === 'pending') {
-    $sql .= " WHERE status = 'inactive' AND role = 'customer'";
+    $sql .= " WHERE status IN ('pending_approval','inactive')";
 } elseif ($roleFilter !== 'all') {
     $sql .= " WHERE role = " . $db->quote($roleFilter);
 }
@@ -140,16 +149,28 @@ $users = $db->query($sql)->fetchAll();
 <?php displayFlash(); ?>
 
 <div class="card">
+    <!-- Live Search Bar -->
+    <div style="padding:16px 20px;border-bottom:1px solid rgba(255,255,255,0.06);">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+            <div style="position:relative;flex:1;min-width:220px;">
+                <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:0.9rem;"></i>
+                <input type="text" id="usersSearchInput"
+                       placeholder="Search by surname, first name, email or Account ID..."
+                       class="form-control" style="padding-left:40px;font-size:0.9rem;">
+            </div>
+            <span id="usersSearchCount" style="font-size:0.82rem;color:var(--text-muted);white-space:nowrap;"></span>
+        </div>
+    </div>
     <div class="table-wrapper">
         <table class="table" id="usersTable">
             <thead>
                 <tr>
                     <th>#</th>
+                    <th>Account ID</th>
                     <th>Name</th>
                     <th>Email</th>
                     <th>Phone</th>
                     <th>Role</th>
-                    <th>IP Address</th>
                     <th>Status</th>
                     <th>Registered</th>
                     <th>Actions</th>
@@ -157,8 +178,15 @@ $users = $db->query($sql)->fetchAll();
             </thead>
             <tbody>
                 <?php foreach ($users as $u): ?>
-                <tr style="<?= $u['status'] === 'inactive' ? 'background:rgba(245,166,35,0.04);' : '' ?>">
+                <tr class="user-row" data-name="<?= strtolower(htmlspecialchars($u['name'])) ?>" data-email="<?= strtolower(htmlspecialchars($u['email'])) ?>" data-code="<?= strtolower(htmlspecialchars($u['id_code'] ?? '')) ?>" style="<?= in_array($u['status'], ['pending_approval','inactive']) ? 'background:rgba(245,166,35,0.04);' : '' ?>">
                     <td><?= $u['user_id'] ?></td>
+                    <td>
+                        <?php if (!empty($u['id_code'])): ?>
+                            <code style="color:#4ecdc4;font-size:0.85rem;font-weight:700;background:rgba(78,205,196,0.1);padding:3px 8px;border-radius:6px;border:1px solid rgba(78,205,196,0.2);"><?= htmlspecialchars($u['id_code']) ?></code>
+                        <?php else: ?>
+                            <span style="color:rgba(255,255,255,0.2);font-size:0.8rem;">—</span>
+                        <?php endif; ?>
+                    </td>
                     <td>
                         <div style="font-weight:600;"><?= htmlspecialchars($u['name']) ?></div>
                         <?php if ($u['address']): ?>
@@ -175,29 +203,12 @@ $users = $db->query($sql)->fetchAll();
                         <span class="badge badge-<?= $rc ?>"><?= ucfirst($u['role']) ?></span>
                     </td>
                     <td>
-                        <?php if ($u['role'] === 'customer'): ?>
-                            <?php if (!empty($u['ip_address'])): ?>
-                                <code style="font-size:0.78rem;color:var(--accent-teal);"><?= htmlspecialchars($u['ip_address']) ?></code>
-                                <form method="POST" style="display:inline;margin-left:6px;">
-                                    <input type="hidden" name="action" value="reset_ip">
-                                    <input type="hidden" name="user_id" value="<?= $u['user_id'] ?>">
-                                    <button type="submit" class="btn btn-warning btn-sm" title="Reset IP — allow login from new device"
-                                            data-confirm="Reset IP for <?= htmlspecialchars($u['name']) ?>? They can then log in from any device once.">
-                                        <i class="fa-solid fa-rotate"></i>
-                                    </button>
-                                </form>
-                            <?php else: ?>
-                                <span style="color:var(--text-muted);font-size:0.82rem;"><i class="fa-solid fa-circle-xmark"></i> Not set</span>
-                            <?php endif; ?>
-                        <?php else: ?>
-                            <span style="color:var(--text-muted);font-size:0.82rem;">N/A</span>
-                        <?php endif; ?>
-                    </td>
-                    <td>
-                        <?php if ($u['status'] === 'inactive'): ?>
+                        <?php if (in_array($u['status'], ['pending_approval','inactive'])): ?>
                             <span class="badge badge-warning" style="display:inline-flex;align-items:center;gap:4px;background:rgba(245,166,35,0.18);color:#f5a623;border:1px solid rgba(245,166,35,0.35);">
                                 <i class="fa-solid fa-clock"></i> Pending Approval
                             </span>
+                        <?php elseif ($u['status'] === 'rejected'): ?>
+                            <span class="badge badge-danger">Rejected</span>
                         <?php else: ?>
                             <form method="POST" style="display:inline;">
                                 <input type="hidden" name="action" value="toggle_status">
@@ -212,15 +223,10 @@ $users = $db->query($sql)->fetchAll();
                     <td style="font-size:0.82rem;"><?= formatDate($u['created_at']) ?></td>
                     <td>
                         <div style="display:flex;align-items:center;gap:6px;">
-                            <?php if ($u['status'] === 'inactive'): ?>
-                                <form method="POST" style="display:inline;margin:0;">
-                                    <input type="hidden" name="action" value="approve">
-                                    <input type="hidden" name="user_id" value="<?= $u['user_id'] ?>">
-                                    <button type="submit" class="btn btn-success btn-sm" title="Approve Customer Account"
-                                            data-confirm="Approve and activate customer account for <?= htmlspecialchars($u['name']) ?>?">
-                                        <i class="fa-solid fa-check"></i> Approve
-                                    </button>
-                                </form>
+                            <?php if (in_array($u['status'], ['pending_approval','inactive'])): ?>
+                                <a href="<?= APP_URL ?>/admin/approvals.php" class="btn btn-warning btn-sm" title="Go to Pending Approvals">
+                                    <i class="fa-solid fa-user-clock"></i> Review
+                                </a>
                             <?php endif; ?>
 
                             <?php if ($u['user_id'] !== (int)$adminId): ?>
@@ -254,10 +260,21 @@ $users = $db->query($sql)->fetchAll();
         <form method="POST">
             <input type="hidden" name="action" value="create">
             <div class="modal-body">
+                <div class="form-group" style="background:rgba(78,205,196,0.06);border:1px solid rgba(78,205,196,0.25);border-radius:12px;padding:14px;margin-bottom:18px;">
+                    <label class="form-label" style="color:#4ecdc4;font-weight:700;margin-bottom:6px;">
+                        <i class="fa-solid fa-fingerprint"></i> Auto-Generated Account ID
+                    </label>
+                    <input type="text" class="form-control" value="<?= getNextAccountIdCodePreview() ?> (Assigned on Approval)" disabled
+                           style="background:rgba(15,15,26,0.7);color:#4ecdc4;font-weight:800;letter-spacing:0.04em;border:1px solid rgba(78,205,196,0.3);opacity:1;">
+                    <div class="form-hint" style="color:rgba(255,255,255,0.6);margin-top:6px;font-size:0.78rem;">
+                        <i class="fa-solid fa-shield-check" style="color:#27ae60;margin-right:4px;"></i>
+                        Guaranteed strictly unique database ID code with zero duplicates (DB Unique Constraint).
+                    </div>
+                </div>
                 <div class="form-row" style="grid-template-columns:1fr 1fr;">
                     <div class="form-group">
                         <label class="form-label">First Name <span style="color:var(--accent-red);">*</span></label>
-                        <input type="text" name="first_name" class="form-control" placeholder="e.g. Maria" required>
+                        <input type="text" name="first_name" id="userFirstName" class="form-control" placeholder="e.g. Maria" required>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Middle Name</label>
@@ -266,11 +283,14 @@ $users = $db->query($sql)->fetchAll();
                 </div>
                 <div class="form-group">
                     <label class="form-label">Surname <span style="color:var(--accent-red);">*</span></label>
-                    <input type="text" name="surname" class="form-control" placeholder="e.g. Santos" required>
+                    <input type="text" name="surname" id="userSurname" class="form-control" placeholder="e.g. Santos" required>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Email Address <span style="color:var(--accent-red);">*</span></label>
-                    <input type="email" name="email" class="form-control" placeholder="customer@email.com" required>
+                    <input type="email" name="email" id="userEmail" class="form-control" placeholder="mariasantos@crafthub.com" required>
+                    <div class="form-hint" style="color:#4ecdc4;margin-top:4px;font-size:0.78rem;">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-fills as <strong>firstnamesurname@crafthub.com</strong>
+                    </div>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
@@ -292,8 +312,17 @@ $users = $db->query($sql)->fetchAll();
                 </div>
                 <div class="form-group">
                     <label class="form-label">Temporary Password <span style="color:var(--accent-red);">*</span></label>
-                    <input type="text" name="password" class="form-control" placeholder="Min. 6 characters" required>
-                    <div class="form-hint">Share this password securely with the customer in person.</div>
+                    <input type="text" name="password" id="userPassword" class="form-control" placeholder="e.g. SantosMaria" required>
+                    <div style="margin-top:6px;font-size:0.8rem;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                        <span style="color:#f5a623;font-weight:600;"><i class="fa-solid fa-lightbulb"></i> Suggested Password:</span>
+                        <button type="button" id="btnUseSuggestPass" title="Click to fill password"
+                                style="background:rgba(245,166,35,0.15);border:1px solid rgba(245,166,35,0.35);color:#f5a623;padding:3px 10px;border-radius:12px;font-weight:700;font-family:monospace;cursor:pointer;transition:all 0.2s;">
+                            <i class="fa-solid fa-hand-pointer" style="font-size:0.75rem;"></i> <span id="passSuggestVal">SurnameFirstname</span>
+                        </button>
+                        <span id="passApplyFeedback" style="color:#27ae60;font-size:0.75rem;font-weight:700;display:none;">
+                            <i class="fa-solid fa-check"></i> Applied!
+                        </span>
+                    </div>
                 </div>
 
                 <div style="background:rgba(233,69,96,0.07);border:1px solid rgba(233,69,96,0.2);border-radius:var(--radius-sm);padding:12px;font-size:0.82rem;color:var(--text-secondary);">
@@ -310,3 +339,87 @@ $users = $db->query($sql)->fetchAll();
 </div>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
+
+<script>
+// Live surname/name search for users table & Auto email generator
+(function() {
+    const input   = document.getElementById('usersSearchInput');
+    const countEl = document.getElementById('usersSearchCount');
+    if (input) {
+        function filterUsers() {
+            const q = input.value.trim().toLowerCase();
+            const rows = document.querySelectorAll('#usersTable .user-row');
+            let visible = 0;
+            rows.forEach(row => {
+                const name  = row.dataset.name  || '';
+                const email = row.dataset.email || '';
+                const code  = row.dataset.code  || '';
+                const text  = row.textContent.toLowerCase();
+                const match = !q || name.includes(q) || email.includes(q) || code.includes(q) || text.includes(q);
+                row.style.display = match ? '' : 'none';
+                if (match) visible++;
+            });
+            if (q) {
+                countEl.textContent = `${visible} user(s) found for "${input.value}"`;
+            } else {
+                countEl.textContent = `${rows.length} total users`;
+            }
+        }
+        input.addEventListener('input', filterUsers);
+        filterUsers();
+    }
+
+    // Auto-generate @crafthub.com email & interactive clickable temporary password
+    const fnInput      = document.getElementById('userFirstName');
+    const snInput      = document.getElementById('userSurname');
+    const emailInput   = document.getElementById('userEmail');
+    const passInput    = document.getElementById('userPassword');
+    const suggestBtn   = document.getElementById('btnUseSuggestPass');
+    const suggestVal   = document.getElementById('passSuggestVal');
+    const feedbackSpan = document.getElementById('passApplyFeedback');
+
+    if (fnInput && snInput && emailInput) {
+        let isCustomEmail = false;
+        let isCustomPass  = false;
+        emailInput.addEventListener('input', () => { isCustomEmail = emailInput.value.trim() !== ''; });
+        if (passInput) {
+            passInput.addEventListener('input', () => { isCustomPass = passInput.value.trim() !== ''; });
+        }
+
+        function genFields() {
+            const rawFn = fnInput.value.trim();
+            const rawSn = snInput.value.trim();
+            const fnClean = rawFn.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const snClean = rawSn.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+            if (!isCustomEmail && (fnClean || snClean)) {
+                emailInput.value = fnClean + snClean + '@crafthub.com';
+            }
+
+            const snCap = rawSn ? rawSn.charAt(0).toUpperCase() + rawSn.slice(1).toLowerCase().replace(/[^a-z0-9]/g, '') : 'Surname';
+            const fnCap = rawFn ? rawFn.charAt(0).toUpperCase() + rawFn.slice(1).toLowerCase().replace(/[^a-z0-9]/g, '') : 'Firstname';
+            const suggested = (rawSn || rawFn) ? (snCap + fnCap) : 'SurnameFirstname';
+
+            if (suggestVal) suggestVal.textContent = suggested;
+
+            if (passInput && !isCustomPass && (rawFn || rawSn)) {
+                passInput.value = suggested;
+            }
+        }
+
+        fnInput.addEventListener('input', genFields);
+        snInput.addEventListener('input', genFields);
+
+        if (suggestBtn && passInput) {
+            suggestBtn.addEventListener('click', () => {
+                passInput.value = suggestVal.textContent;
+                isCustomPass = false;
+                if (feedbackSpan) {
+                    feedbackSpan.style.display = 'inline';
+                    setTimeout(() => { feedbackSpan.style.display = 'none'; }, 1500);
+                }
+            });
+        }
+    }
+})();
+</script>

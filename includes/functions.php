@@ -58,6 +58,36 @@ function formatCurrency($amount): string {
 // -----------------------------------------------
 //  Booking Reference Generator
 // -----------------------------------------------
+// -----------------------------------------------
+//  Account ID Code Generator (approval-time)
+// -----------------------------------------------
+function generateAccountIdCode(): string {
+    $db = getDB();
+    // Insert into the sequence table — AUTO_INCREMENT guarantees a unique value
+    // even under concurrent requests, without needing SELECT MAX() + retry logic.
+    $db->exec("INSERT INTO account_id_seq (dummy) VALUES (0)");
+    $seq = (int)$db->lastInsertId();
+    return 'TH-' . str_pad($seq, 6, '0', STR_PAD_LEFT);
+}
+
+// -----------------------------------------------
+//  Get Next Account ID Code Preview
+// -----------------------------------------------
+function getNextAccountIdCodePreview(): string {
+    try {
+        $db = getDB();
+        $stmt = $db->query("SELECT AUTO_INCREMENT FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'account_id_seq'");
+        $val = $stmt->fetchColumn();
+        $next = $val ? (int)$val : 1;
+        return 'TH-' . str_pad($next, 6, '0', STR_PAD_LEFT);
+    } catch (Exception $e) {
+        return 'TH-000123';
+    }
+}
+
+// -----------------------------------------------
+//  Booking Reference Generator
+// -----------------------------------------------
 function generateBookingRef(): string {
     $db   = getDB();
     $year = date('Y');
@@ -99,21 +129,28 @@ function logAudit(int $userId, string $action, string $description, string $tabl
 function statusBadge(?string $status): string {
     $statusStr = $status ?? 'unknown';
     $map = [
-        'active'      => 'success',
-        'available'   => 'success',
-        'confirmed'   => 'success',
-        'completed'   => 'info',
-        'paid'        => 'success',
-        'pending'     => 'warning',
-        'partial'     => 'warning',
-        'unpaid'      => 'danger',
-        'inactive'    => 'secondary',
-        'cancelled'   => 'danger',
-        'maintenance' => 'warning',
-        'banned'      => 'danger',
+        'active'           => 'success',
+        'available'        => 'success',
+        'confirmed'        => 'success',
+        'completed'        => 'info',
+        'paid'             => 'success',
+        'pending'          => 'warning',
+        'partial'          => 'warning',
+        'unpaid'           => 'danger',
+        'inactive'         => 'secondary',
+        'cancelled'        => 'danger',
+        'maintenance'      => 'warning',
+        'banned'           => 'danger',
+        'pending_approval' => 'warning',
+        'rejected'         => 'danger',
+    ];
+    $labels = [
+        'pending_approval' => 'Pending Approval',
+        'rejected'         => 'Rejected',
     ];
     $class = $map[strtolower($statusStr)] ?? 'secondary';
-    return "<span class=\"badge badge-{$class}\">" . ucfirst($statusStr) . "</span>";
+    $label = $labels[$statusStr] ?? ucfirst($statusStr);
+    return "<span class=\"badge badge-{$class}\">" . htmlspecialchars($label) . "</span>";
 }
 
 // -----------------------------------------------

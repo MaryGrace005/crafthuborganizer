@@ -2,6 +2,7 @@
 $pageTitle = 'My Dashboard';
 require_once __DIR__ . '/../includes/header.php';
 requireRole(['customer']);
+requireApproved();
 
 $user  = getCurrentUser();
 $stats = getDashboardStats('customer', $user['id']);
@@ -19,6 +20,20 @@ $stmt = $db->prepare("
 ");
 $stmt->execute([$user['user_id'] ?? $user['id']]);
 $recentBookings = $stmt->fetchAll();
+
+// Recent payment receipts for customer
+$payStmt = $db->prepare("
+    SELECT py.*, py.payment_id AS id, b.total_amount, p.package_name AS package_name,
+           u.name AS cashier_name
+    FROM payments py
+    JOIN bookings b ON py.booking_id = b.booking_id
+    JOIN packages p ON b.package_id = p.package_id
+    JOIN users u ON py.cashier_id = u.user_id
+    WHERE b.customer_id = ?
+    ORDER BY py.payment_date DESC LIMIT 4
+");
+$payStmt->execute([$user['user_id'] ?? $user['id']]);
+$recentReceipts = $payStmt->fetchAll();
 ?>
 
 <?php require_once __DIR__ . '/../includes/navbar.php'; ?>
@@ -27,6 +42,13 @@ $recentBookings = $stmt->fetchAll();
     <div>
         <h1>Welcome back, <?= htmlspecialchars(explode(' ', $user['name'])[0]) ?>! 👋</h1>
         <p>Here's an overview of your craft bookings, payments, and activities.</p>
+        <?php if (!empty($user['id_code'])): ?>
+        <div style="display:inline-flex;align-items:center;gap:8px;margin-top:8px;padding:6px 14px;background:rgba(78,205,196,0.1);border:1px solid rgba(78,205,196,0.25);border-radius:20px;">
+            <i class="fa-solid fa-id-badge" style="color:#4ecdc4;"></i>
+            <span style="font-size:0.82rem;color:rgba(255,255,255,0.5);">Account ID:</span>
+            <code style="font-weight:800;color:#4ecdc4;font-size:0.9rem;letter-spacing:0.04em;"><?= htmlspecialchars($user['id_code']) ?></code>
+        </div>
+        <?php endif; ?>
     </div>
     <a href="<?= APP_URL ?>/customer/packages.php" class="btn btn-primary">
         <i class="fa-solid fa-plus"></i> Book a Package
@@ -127,6 +149,53 @@ $recentBookings = $stmt->fetchAll();
                             <?php endif; ?>
                         </td>
                         <td><?= statusBadge($payStatus) ?></td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    <?php endif; ?>
+</div>
+
+<!-- Recent Payment Receipts Card -->
+<div class="card" style="margin-top:24px;">
+    <div class="card-header">
+        <h2 class="card-title"><i class="fa-solid fa-receipt" style="color:var(--accent-gold);"></i> Recent Payment Receipts</h2>
+        <a href="<?= APP_URL ?>/customer/payment_history.php" class="btn btn-secondary btn-sm">View All Receipts</a>
+    </div>
+
+    <?php if (empty($recentReceipts)): ?>
+        <div class="empty-state" style="padding:24px;">
+            <p style="color:var(--text-muted);font-size:0.88rem;">No payment receipts found yet.</p>
+        </div>
+    <?php else: ?>
+        <div class="table-wrapper">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Receipt OR#</th>
+                        <th>Booking Ref</th>
+                        <th>Package</th>
+                        <th>Amount Paid</th>
+                        <th>Method</th>
+                        <th>Date</th>
+                        <th>Receipt</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($recentReceipts as $rcpt): ?>
+                    <tr>
+                        <td><strong style="color:var(--accent-gold);"><?= htmlspecialchars($rcpt['or_number'] ?? ('OR-' . $rcpt['id'])) ?></strong></td>
+                        <td><strong style="color:var(--accent-teal);"><?= htmlspecialchars(getBookingRef($rcpt)) ?></strong></td>
+                        <td><?= htmlspecialchars($rcpt['package_name']) ?></td>
+                        <td><strong style="color:#27ae60;"><?= formatCurrency($rcpt['amount_paid']) ?></strong></td>
+                        <td><span class="badge badge-secondary"><?= ucwords(str_replace('_',' ', $rcpt['payment_method'] ?? 'cash')) ?></span></td>
+                        <td><?= formatDateTime($rcpt['payment_date']) ?></td>
+                        <td>
+                            <a href="<?= APP_URL ?>/receipt.php?id=<?= (int)$rcpt['id'] ?>" target="_blank" class="btn btn-primary btn-sm">
+                                <i class="fa-solid fa-file-invoice"></i> View Receipt
+                            </a>
+                        </td>
                     </tr>
                     <?php endforeach; ?>
                 </tbody>

@@ -2,6 +2,7 @@
 $pageTitle = 'Browse Packages';
 require_once __DIR__ . '/../includes/header.php';
 requireRole(['customer']);
+requireApproved();
 
 // Ensure generated images are saved in assets/images/
 @include_once __DIR__ . '/../copy_images.php';
@@ -68,6 +69,71 @@ $catIcons = [
 
 <?php displayFlash(); ?>
 
+<!-- Event Type Category Filter Tabs -->
+<div style="display:flex;gap:10px;margin-bottom:24px;flex-wrap:wrap;align-items:center;">
+    <span style="font-size:0.85rem;color:var(--text-muted);font-weight:700;margin-right:4px;">
+        <i class="fa-solid fa-filter"></i> Filter by Event:
+    </span>
+    <button class="event-filter-tab active" data-type="all" onclick="filterPackages('all')">
+        <i class="fa-solid fa-border-all"></i> All Packages
+    </button>
+    <button class="event-filter-tab" data-type="Wedding" onclick="filterPackages('Wedding')">
+        💍 Wedding
+    </button>
+    <button class="event-filter-tab" data-type="Birthday" onclick="filterPackages('Birthday')">
+        🎂 Birthday
+    </button>
+    <button class="event-filter-tab" data-type="Debut" onclick="filterPackages('Debut')">
+        💃 Debut
+    </button>
+    <button class="event-filter-tab" data-type="Christening" onclick="filterPackages('Christening')">
+        🕊️ Christening
+    </button>
+</div>
+
+<style>
+.event-filter-tab {
+    padding: 8px 18px;
+    border-radius: 30px;
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    cursor: pointer;
+    transition: all 0.25s ease;
+}
+.event-filter-tab:hover {
+    color: #fff;
+    background: rgba(255,255,255,0.1);
+    border-color: rgba(255,255,255,0.2);
+    transform: translateY(-1px);
+}
+.event-filter-tab.active {
+    background: linear-gradient(135deg, #e94560, #c0392b);
+    color: #fff;
+    border-color: rgba(233,69,96,0.4);
+    box-shadow: 0 4px 14px rgba(233,69,96,0.4);
+}
+.comp-cat-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 2px 8px;
+    border-radius: 6px;
+    margin-bottom: 4px;
+}
+.cat-venue       { background: rgba(39,174,96,0.15); color: #27ae60; border: 1px solid rgba(39,174,96,0.3); }
+.cat-food        { background: rgba(245,166,35,0.15); color: #f5a623; border: 1px solid rgba(245,166,35,0.3); }
+.cat-photography { background: rgba(78,205,196,0.15); color: #4ecdc4; border: 1px solid rgba(78,205,196,0.3); }
+.cat-decoration  { background: rgba(168,85,247,0.15); color: #a855f7; border: 1px solid rgba(168,85,247,0.3); }
+</style>
+
 <?php if (empty($packages)): ?>
     <div class="empty-state">
         <i class="fa-solid fa-box-open"></i>
@@ -88,7 +154,7 @@ $catIcons = [
             // Image fallback logic
             $imgPath     = !empty($pkg['image_url']) ? $pkg['image_url'] : ($defaultImages[$pkg['event_type']] ?? 'assets/images/packages/wedding.png');
         ?>
-        <div class="package-card" style="overflow:hidden;<?= $isFull ? 'opacity:0.75;' : '' ?>">
+        <div class="package-card pkg-item-card" data-event-type="<?= htmlspecialchars($pkg['event_type']) ?>" style="overflow:hidden;<?= $isFull ? 'opacity:0.75;' : '' ?>">
 
             <!-- Package Preview Image -->
             <div style="position:relative;height:180px;overflow:hidden;background:#1a1a2e;">
@@ -137,22 +203,40 @@ $catIcons = [
                         </span>
                     </div>
 
-                    <?php if (!empty($components)): ?>
-                        <ul style="list-style:none;padding:0;margin:0;display:grid;gap:6px;">
-                            <?php foreach ($components as $c): ?>
-                                <li style="display:flex;align-items:flex-start;gap:8px;font-size:0.83rem;color:var(--text-primary);">
-                                    <i class="fa-solid <?= $catIcons[$c['category']] ?? 'fa-circle-check' ?>"
-                                       style="color:var(--accent-teal);margin-top:3px;font-size:0.8rem;width:14px;text-align:center;"
-                                       title="<?= ucfirst($c['category']) ?>"></i>
+                    <?php if (!empty($components)):
+                        // Group components by category for organized display
+                        $groupedComps = [];
+                        foreach ($components as $c) {
+                            $groupedComps[$c['category']][] = $c;
+                        }
+                        $catLabels = [
+                            'venue'       => ['label' => 'Venue & Facilities', 'icon' => 'fa-building', 'class' => 'cat-venue'],
+                            'food'        => ['label' => 'Food & Catering',     'icon' => 'fa-utensils', 'class' => 'cat-food'],
+                            'photography' => ['label' => 'Photo & Video',       'icon' => 'fa-camera',   'class' => 'cat-photography'],
+                            'decoration'  => ['label' => 'Decor & Styling',     'icon' => 'fa-palette',  'class' => 'cat-decoration']
+                        ];
+                    ?>
+                        <div style="display:flex;flex-direction:column;gap:10px;">
+                            <?php foreach ($catLabels as $catKey => $catMeta): ?>
+                                <?php if (!empty($groupedComps[$catKey])): ?>
                                     <div>
-                                        <strong><?= htmlspecialchars($c['name']) ?></strong>
-                                        <?php if (!empty($c['description'])): ?>
-                                            <div style="font-size:0.75rem;color:var(--text-secondary);"><?= htmlspecialchars($c['description']) ?></div>
-                                        <?php endif; ?>
+                                        <span class="comp-cat-badge <?= $catMeta['class'] ?>">
+                                            <i class="fa-solid <?= $catMeta['icon'] ?>"></i> <?= $catMeta['label'] ?>
+                                        </span>
+                                        <ul style="list-style:none;padding:0;margin:4px 0 0 0;display:grid;gap:4px;">
+                                            <?php foreach ($groupedComps[$catKey] as $c): ?>
+                                                <li style="font-size:0.82rem;color:var(--text-primary);padding-left:6px;border-left:2px solid rgba(255,255,255,0.1);">
+                                                    <strong><?= htmlspecialchars($c['name']) ?></strong>
+                                                    <?php if (!empty($c['description'])): ?>
+                                                        <span style="font-size:0.75rem;color:var(--text-secondary);display:block;"><?= htmlspecialchars($c['description']) ?></span>
+                                                    <?php endif; ?>
+                                                </li>
+                                            <?php endforeach; ?>
+                                        </ul>
                                     </div>
-                                </li>
+                                <?php endif; ?>
                             <?php endforeach; ?>
-                        </ul>
+                        </div>
                     <?php else: ?>
                         <div style="font-size:0.8rem;color:var(--text-muted);font-style:italic;">
                             Standard craft package setup and coordination included.
@@ -208,3 +292,20 @@ $catIcons = [
 <?php endif; ?>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
+
+<script>
+function filterPackages(eventType) {
+    document.querySelectorAll('.event-filter-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.type === eventType);
+    });
+
+    document.querySelectorAll('.pkg-item-card').forEach(card => {
+        const cardType = card.dataset.eventType;
+        if (eventType === 'all' || cardType === eventType) {
+            card.style.display = '';
+        } else {
+            card.style.display = 'none';
+        }
+    });
+}
+</script>

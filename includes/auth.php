@@ -49,9 +49,29 @@ function requireRole(array $roles): void {
 function getCurrentUser(): ?array {
     if (!isLoggedIn()) return null;
     $db   = getDB();
-    $stmt = $db->prepare("SELECT *, user_id AS id, contact_no AS phone FROM users WHERE user_id = ? AND status = 'active'");
+    // Fetch active, pending_approval, and rejected users (pages like pending.php need user info)
+    $stmt = $db->prepare("SELECT *, user_id AS id, contact_no AS phone FROM users WHERE user_id = ?");
     $stmt->execute([$_SESSION['user_id']]);
     return $stmt->fetch() ?: null;
+}
+
+// -----------------------------------------------
+//  Check if current user is fully approved
+// -----------------------------------------------
+function isApproved(): bool {
+    $user = getCurrentUser();
+    return $user && $user['status'] === 'active';
+}
+
+// -----------------------------------------------
+//  Require Approved — redirect pending/rejected to holding page
+// -----------------------------------------------
+function requireApproved(): void {
+    requireLogin();
+    $user = getCurrentUser();
+    if (!$user || $user['status'] !== 'active') {
+        redirect(APP_URL . '/pending.php');
+    }
 }
 
 // -----------------------------------------------

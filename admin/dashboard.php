@@ -10,9 +10,18 @@ $adminId = $_SESSION['user_id'] ?? 0;
 // Handle POST Approve directly from dashboard
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'approve') {
     $uid = (int)($_POST['user_id'] ?? 0);
-    $db->prepare("UPDATE users SET status = 'active' WHERE user_id = ?")->execute([$uid]);
-    logAudit($adminId, 'APPROVE_USER', "Admin approved customer account #{$uid} from dashboard", 'users');
-    setFlash('success', 'Customer account approved and activated successfully!');
+    $target = $db->prepare("SELECT * FROM users WHERE user_id = ? AND status IN ('pending_approval','inactive')");
+    $target->execute([$uid]);
+    $targetUser = $target->fetch();
+    if ($targetUser) {
+        $idCode = generateAccountIdCode();
+        $db->prepare("UPDATE users SET status = 'active', id_code = ? WHERE user_id = ?")
+           ->execute([$idCode, $uid]);
+        logAudit($adminId, 'APPROVE_USER', "Admin approved account #{$uid} from dashboard → {$idCode}", 'users');
+        setFlash('success', "Account approved! Account ID: <strong>{$idCode}</strong>");
+    } else {
+        setFlash('error', 'Account not found or already processed.');
+    }
     redirect(APP_URL . '/admin/dashboard.php');
 }
 
@@ -37,7 +46,7 @@ $revenueStmt = $db->query("
 $revenueData = $revenueStmt->fetchAll();
 
 // Pending user account approvals
-$pendingUsers = $db->query("SELECT * FROM users WHERE status = 'inactive' AND role = 'customer' ORDER BY created_at DESC")->fetchAll();
+$pendingUsers = $db->query("SELECT * FROM users WHERE status IN ('pending_approval','inactive') ORDER BY created_at DESC")->fetchAll();
 $pendingAccountsCount = count($pendingUsers);
 ?>
 

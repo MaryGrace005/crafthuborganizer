@@ -252,8 +252,11 @@ $bookings = $stmt->fetchAll();
     <div class="search-bar">
         <div class="search-input-wrapper">
             <i class="fa-solid fa-search"></i>
-            <input type="text" class="form-control" placeholder="Search bookings..." data-search-table="allBookingsTable">
+            <input type="text" id="bookingSearchInput" class="form-control"
+                   placeholder="Search by customer name, surname, or booking ref..."
+                   style="font-size:0.9rem;">
         </div>
+        <span id="bookingSearchCount" style="margin-left:12px;font-size:0.82rem;color:var(--text-muted);"></span>
     </div>
 
     <div class="table-wrapper">
@@ -273,7 +276,7 @@ $bookings = $stmt->fetchAll();
             </thead>
             <tbody>
                 <?php foreach ($bookings as $b): ?>
-                <tr>
+                <tr class="booking-row" data-name="<?= strtolower(htmlspecialchars($b['customer_name'])) ?>" data-ref="<?= strtolower(htmlspecialchars(getBookingRef($b))) ?>">
                     <td>
                         <span class="ref-chip">
                             <i class="fa-solid fa-hashtag" style="font-size:0.7rem;opacity:0.7;"></i>
@@ -353,3 +356,31 @@ $bookings = $stmt->fetchAll();
 </div>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
+
+<script>
+// Live surname/name search for bookings table
+(function() {
+    const input = document.getElementById('bookingSearchInput');
+    const countEl = document.getElementById('bookingSearchCount');
+    if (!input) return;
+
+    function filterRows() {
+        const q = input.value.trim().toLowerCase();
+        const rows = document.querySelectorAll('#allBookingsTable .booking-row');
+        let visible = 0;
+        rows.forEach(row => {
+            const name = row.dataset.name || '';
+            const ref  = row.dataset.ref  || '';
+            const text = row.textContent.toLowerCase();
+            const match = !q || name.includes(q) || ref.includes(q) || text.includes(q);
+            row.style.display = match ? '' : 'none';
+            if (match) visible++;
+        });
+        countEl.textContent = q ? `${visible} result(s) for "${input.value}"` : '';
+    }
+
+    input.addEventListener('input', filterRows);
+    // Initial count
+    filterRows();
+})();
+</script>

@@ -70,22 +70,40 @@ function uploadBookingImage(
     // Insert into DB
     try {
         $db  = getDB();
-        $stmt = $db->prepare("
-            INSERT INTO booking_images
-                (booking_id, uploaded_by, image_type, image_path, original_name, mime_type, file_size, caption, is_public)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ");
-        $stmt->execute([
-            $bookingId,
-            $uploadedBy,
-            $imageType,
-            $relativePath,
-            basename($file['name']),
-            $mimeType,
-            $file['size'],
-            $caption ?: null,
-            $isPublic,
-        ]);
+        try {
+            $stmt = $db->prepare("
+                INSERT INTO booking_images
+                    (booking_id, uploaded_by, image_type, image_path, original_name, mime_type, file_size, caption, is_public)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                $bookingId,
+                $uploadedBy,
+                $imageType,
+                $relativePath,
+                basename($file['name']),
+                $mimeType,
+                $file['size'],
+                $caption ?: null,
+                $isPublic,
+            ]);
+        } catch (PDOException $e) {
+            // Fallback for legacy schema (file_name, file_path)
+            $stmt = $db->prepare("
+                INSERT INTO booking_images
+                    (booking_id, uploaded_by, file_name, file_path, mime_type, file_size, caption)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                $bookingId,
+                $uploadedBy,
+                basename($file['name']),
+                $relativePath,
+                $mimeType,
+                $file['size'],
+                $caption ?: null,
+            ]);
+        }
         $imageId = (int)$db->lastInsertId();
 
         logAudit($uploadedBy, 'IMAGE_UPLOAD', "Uploaded {$imageType} for booking #{$bookingId}: {$safeName}", 'booking_images');
@@ -94,7 +112,7 @@ function uploadBookingImage(
     } catch (PDOException $e) {
         // Clean up file if DB insert failed
         @unlink($targetPath);
-        return ['success' => false, 'error' => 'Database error saving image record.'];
+        return ['success' => false, 'error' => 'Database error saving image record: ' . $e->getMessage()];
     }
 }
 

@@ -9,22 +9,32 @@ $currentDir  = basename(dirname($_SERVER['PHP_SELF']));
 $navLinks = [];
 
 if ($_SESSION['user_role'] === 'admin') {
+    // Count pending approvals for the badge
+    try {
+        $_pendingApprovalCount = (int)getDB()->query("SELECT COUNT(*) FROM users WHERE status IN ('pending_approval','inactive')")->fetchColumn();
+    } catch (Exception $e) {
+        $_pendingApprovalCount = 0;
+    }
     $navLinks = [
-        ['href' => APP_URL . '/admin/dashboard.php',   'icon' => 'fa-gauge',       'label' => 'Dashboard'],
-        ['href' => APP_URL . '/admin/packages.php',    'icon' => 'fa-box-open',    'label' => 'Packages'],
-        ['href' => APP_URL . '/admin/components.php',  'icon' => 'fa-puzzle-piece','label' => 'Components'],
-        ['href' => APP_URL . '/admin/venues.php',      'icon' => 'fa-location-dot','label' => 'Venues'],
-        ['href' => APP_URL . '/admin/bookings.php',    'icon' => 'fa-calendar-check','label' => 'Bookings'],
-        ['href' => APP_URL . '/admin/users.php',       'icon' => 'fa-users',       'label' => 'Users'],
-        ['href' => APP_URL . '/admin/reports.php',     'icon' => 'fa-chart-bar',   'label' => 'Reports'],
-        ['href' => APP_URL . '/admin/audit.php',       'icon' => 'fa-shield-halved','label' => 'Audit Log'],
+        ['href' => APP_URL . '/admin/dashboard.php',   'icon' => 'fa-gauge',              'label' => 'Dashboard'],
+        ['href' => APP_URL . '/admin/approvals.php',   'icon' => 'fa-user-clock',         'label' => 'Pending Approvals', 'badge' => $_pendingApprovalCount],
+        ['href' => APP_URL . '/admin/packages.php',    'icon' => 'fa-box-open',            'label' => 'Packages'],
+        ['href' => APP_URL . '/admin/components.php',  'icon' => 'fa-puzzle-piece',        'label' => 'Components'],
+        ['href' => APP_URL . '/admin/venues.php',      'icon' => 'fa-location-dot',        'label' => 'Venues'],
+        ['href' => APP_URL . '/admin/bookings.php',    'icon' => 'fa-calendar-check',      'label' => 'Bookings'],
+        ['href' => APP_URL . '/admin/bills.php',       'icon' => 'fa-file-invoice-dollar', 'label' => 'Bills & Payments'],
+        ['href' => APP_URL . '/admin/users.php',       'icon' => 'fa-users',               'label' => 'Users'],
+        ['href' => APP_URL . '/admin/reports.php',     'icon' => 'fa-chart-bar',           'label' => 'Reports'],
+        ['href' => APP_URL . '/admin/audit.php',       'icon' => 'fa-shield-halved',       'label' => 'Audit Log'],
     ];
+
 } elseif ($_SESSION['user_role'] === 'staff' || $_SESSION['user_role'] === 'cashier') {
     $navLinks = [
-        ['href' => APP_URL . '/staff/dashboard.php',       'icon' => 'fa-gauge',          'label' => 'Dashboard'],
-        ['href' => APP_URL . '/staff/customers.php',       'icon' => 'fa-user-plus',      'label' => 'Register Customer'],
-        ['href' => APP_URL . '/staff/payments.php',        'icon' => 'fa-money-bill-wave','label' => 'Payments'],
-        ['href' => APP_URL . '/staff/collection.php',      'icon' => 'fa-receipt',        'label' => 'Collection'],
+        ['href' => APP_URL . '/staff/dashboard.php',       'icon' => 'fa-gauge',              'label' => 'Dashboard'],
+        ['href' => APP_URL . '/staff/customers.php',       'icon' => 'fa-user-plus',          'label' => 'Register Customer'],
+        ['href' => APP_URL . '/staff/bills.php',           'icon' => 'fa-file-invoice-dollar', 'label' => 'Bills & Balances'],
+        ['href' => APP_URL . '/staff/collection.php',      'icon' => 'fa-money-bill-wave',     'label' => 'Payments Log'],
+        ['href' => APP_URL . '/staff/reports.php',         'icon' => 'fa-chart-line',          'label' => 'Analytics & Reports'],
     ];
 } elseif ($_SESSION['user_role'] === 'customer') {
     $navLinks = [
@@ -57,15 +67,24 @@ $roleLabel  = ucfirst($_SESSION['user_role']);
     <nav class="sidebar-nav">
         <ul>
             <?php foreach ($navLinks as $link):
-                $isActive = (basename($link['href']) === $currentFile) ? 'active' : '';
-            ?>
-            <li>
-                <a href="<?= $link['href'] ?>" class="nav-link <?= $isActive ?>">
-                    <i class="fa-solid <?= $link['icon'] ?>"></i>
-                    <span><?= $link['label'] ?></span>
-                </a>
-            </li>
-            <?php endforeach; ?>
+            $isActive  = (basename($link['href']) === $currentFile) ? 'active' : '';
+            $badgeVal  = (int)($link['badge'] ?? 0);
+            $isPending = basename($link['href']) === 'approvals.php';
+        ?>
+        <li>
+            <a href="<?= $link['href'] ?>" class="nav-link <?= $isActive ?>"
+               style="<?= ($isPending && $badgeVal > 0) ? 'position:relative;' : '' ?>">
+                <i class="fa-solid <?= $link['icon'] ?>"
+                   style="<?= ($isPending && $badgeVal > 0) ? 'color:#f5a623;' : '' ?>"></i>
+                <span><?= $link['label'] ?></span>
+                <?php if ($badgeVal > 0): ?>
+                <span style="margin-left:auto;min-width:20px;height:20px;background:#f5a623;color:#0f0f1a;border-radius:10px;font-size:0.72rem;font-weight:800;display:flex;align-items:center;justify-content:center;padding:0 5px;">
+                    <?= $badgeVal ?>
+                </span>
+                <?php endif; ?>
+            </a>
+        </li>
+        <?php endforeach; ?>
         </ul>
     </nav>
 

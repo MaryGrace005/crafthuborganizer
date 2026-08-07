@@ -19,7 +19,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $inclusions  = trim($_POST['inclusions'] ?? '');
         $userId      = $_SESSION['user_id'] ?? 0;
 
-        // Auto fallback image based on event type if blank
+        // ── Handle file upload ─────────────────────────────────────────
+        $uploadDir = __DIR__ . '/../uploads/packages/';
+        if (!is_dir($uploadDir)) {
+            mkdir($uploadDir, 0755, true);
+        }
+        if (!empty($_FILES['image_file']['name']) && $_FILES['image_file']['error'] === UPLOAD_ERR_OK) {
+            $allowed   = ['image/jpeg','image/png','image/gif','image/webp'];
+            $mimeType  = mime_content_type($_FILES['image_file']['tmp_name']);
+            if (in_array($mimeType, $allowed)) {
+                $ext      = pathinfo($_FILES['image_file']['name'], PATHINFO_EXTENSION);
+                $fileName = 'pkg_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . strtolower($ext);
+                $destPath = $uploadDir . $fileName;
+                if (move_uploaded_file($_FILES['image_file']['tmp_name'], $destPath)) {
+                    $imageUrl = 'uploads/packages/' . $fileName;
+                }
+            } else {
+                setFlash('error', 'Invalid image type. Please upload JPG, PNG, GIF, or WebP.');
+                redirect(APP_URL . '/admin/packages.php');
+            }
+        }
+
+        // Auto fallback image based on event type if still blank
         if (empty($imageUrl)) {
             $defaultImages = [
                 'Wedding'    => 'assets/images/packages/wedding.png',
@@ -351,11 +372,59 @@ unset($p);
 
 <?php displayFlash(); ?>
 
+<!-- Event Category Filter Tabs -->
+<div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;align-items:center;">
+    <span style="font-size:0.85rem;color:var(--text-muted);font-weight:700;margin-right:4px;">
+        <i class="fa-solid fa-filter"></i> Filter Category:
+    </span>
+    <button class="pkg-filter-tab active" data-type="all" onclick="filterAdminPackages('all')">
+        <i class="fa-solid fa-border-all"></i> All Packages
+    </button>
+    <button class="pkg-filter-tab" data-type="Wedding" onclick="filterAdminPackages('Wedding')">
+        💍 Wedding
+    </button>
+    <button class="pkg-filter-tab" data-type="Birthday" onclick="filterAdminPackages('Birthday')">
+        🎂 Birthday
+    </button>
+    <button class="pkg-filter-tab" data-type="Debut" onclick="filterAdminPackages('Debut')">
+        💃 Debut
+    </button>
+    <button class="pkg-filter-tab" data-type="Christening" onclick="filterAdminPackages('Christening')">
+        🕊️ Christening
+    </button>
+</div>
+
+<style>
+.pkg-filter-tab {
+    padding: 7px 16px;
+    border-radius: 30px;
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    cursor: pointer;
+    transition: all 0.25s ease;
+}
+.pkg-filter-tab:hover {
+    color: #fff;
+    background: rgba(255,255,255,0.1);
+    border-color: rgba(255,255,255,0.2);
+}
+.pkg-filter-tab.active {
+    background: linear-gradient(135deg, #e94560, #c0392b);
+    color: #fff;
+    border-color: rgba(233,69,96,0.4);
+    box-shadow: 0 4px 14px rgba(233,69,96,0.4);
+}
+</style>
+
 <div class="card">
     <div class="search-bar">
         <div class="search-input-wrapper">
             <i class="fa-solid fa-search"></i>
-            <input type="text" class="form-control" placeholder="Search packages..." data-search-table="pkgTable">
+            <input type="text" id="adminPkgSearch" class="form-control" placeholder="Search packages by name, type, or inclusions...">
         </div>
     </div>
 
@@ -376,7 +445,7 @@ unset($p);
             </thead>
             <tbody>
                 <?php foreach ($packages as $p): ?>
-                <tr>
+                <tr class="admin-pkg-row" data-event-type="<?= htmlspecialchars($p['event_type'] ?? 'Wedding') ?>">
                     <td>
                         <div style="width:54px;height:42px;border-radius:6px;overflow:hidden;background:#1a1a2e;border:1px solid var(--border-color);">
                             <img src="<?= APP_URL ?>/<?= htmlspecialchars($p['image']) ?>"
@@ -404,11 +473,20 @@ unset($p);
                         </div>
                     </td>
                     <td>
-                        <?php if (!empty($p['components_list'])): ?>
-                            <div style="display:flex;flex-wrap:wrap;gap:4px;max-width:220px;">
-                                <?php foreach ($p['components_list'] as $comp): ?>
-                                    <span style="background:rgba(78,205,196,0.12);color:var(--accent-teal);border:1px solid rgba(78,205,196,0.25);border-radius:12px;padding:2px 8px;font-size:0.72rem;font-weight:500;">
-                                        <i class="fa-solid fa-check" style="font-size:0.6rem;"></i> <?= htmlspecialchars($comp['name']) ?>
+                        <?php if (!empty($p['components_list'])):
+                            $catColors = [
+                                'venue'       => ['bg'=>'rgba(39,174,96,0.12)',  'color'=>'#27ae60','border'=>'rgba(39,174,96,0.3)'],
+                                'food'        => ['bg'=>'rgba(245,166,35,0.12)', 'color'=>'#f5a623','border'=>'rgba(245,166,35,0.3)'],
+                                'photography' => ['bg'=>'rgba(78,205,196,0.12)', 'color'=>'#4ecdc4','border'=>'rgba(78,205,196,0.3)'],
+                                'decoration'  => ['bg'=>'rgba(168,85,247,0.12)','color'=>'#a855f7','border'=>'rgba(168,85,247,0.3)']
+                            ];
+                        ?>
+                            <div style="display:flex;flex-wrap:wrap;gap:4px;max-width:240px;">
+                                <?php foreach ($p['components_list'] as $comp):
+                                    $cc = $catColors[$comp['category']] ?? ['bg'=>'rgba(255,255,255,0.08)','color'=>'#fff','border'=>'rgba(255,255,255,0.15)'];
+                                ?>
+                                    <span style="background:<?= $cc['bg'] ?>;color:<?= $cc['color'] ?>;border:1px solid <?= $cc['border'] ?>;border-radius:10px;padding:2px 7px;font-size:0.71rem;font-weight:600;" title="<?= ucfirst($comp['category']) ?>">
+                                        <?= htmlspecialchars($comp['name']) ?>
                                     </span>
                                 <?php endforeach; ?>
                             </div>
@@ -458,7 +536,7 @@ unset($p);
             <h2 class="modal-title"><i class="fa-solid fa-plus"></i> Add Package</h2>
             <button class="modal-close">&times;</button>
         </div>
-        <form method="POST" action="">
+        <form method="POST" action="" enctype="multipart/form-data">
             <input type="hidden" name="action" value="add">
             <div class="modal-body">
                 <div class="form-group">
@@ -494,9 +572,12 @@ unset($p);
                     </div>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Image Path / URL <span style="color:var(--text-muted)">(optional)</span></label>
-                    <input type="text" name="image_url" class="form-control" placeholder="assets/images/packages/wedding.png">
-                    <div class="form-hint">Leave blank to use auto sample picture based on event type.</div>
+                    <label class="form-label"><i class="fa-solid fa-image" style="color:var(--accent-teal);"></i> Package Image</label>
+                    <input type="file" name="image_file" class="form-control" accept="image/jpeg,image/png,image/gif,image/webp"
+                           style="padding:8px;cursor:pointer;">
+                    <div class="form-hint" style="margin-top:4px;">Upload a JPG, PNG, GIF, or WebP image. Or paste a URL below.</div>
+                    <input type="text" name="image_url" class="form-control" placeholder="assets/images/packages/wedding.png" style="margin-top:8px;">
+                    <div class="form-hint">Leave both blank to auto-select image based on event type.</div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Package Description</label>
@@ -529,7 +610,7 @@ Decoration: Floral & Table Backdrop"></textarea>
             <h2 class="modal-title"><i class="fa-solid fa-pen"></i> Edit Package</h2>
             <button class="modal-close">&times;</button>
         </div>
-        <form method="POST" action="">
+        <form method="POST" action="" enctype="multipart/form-data">
             <input type="hidden" name="action" value="edit">
             <input type="hidden" name="id">
             <div class="modal-body">
@@ -566,8 +647,12 @@ Decoration: Floral & Table Backdrop"></textarea>
                     </div>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Image Path / URL</label>
-                    <input type="text" name="image_url" class="form-control" placeholder="assets/images/packages/wedding.png">
+                    <label class="form-label"><i class="fa-solid fa-image" style="color:var(--accent-teal);"></i> Package Image</label>
+                    <input type="file" name="image_file" class="form-control" accept="image/jpeg,image/png,image/gif,image/webp"
+                           style="padding:8px;cursor:pointer;">
+                    <div class="form-hint" style="margin-top:4px;">Upload a new image to replace the current one. Or paste a URL below.</div>
+                    <input type="text" name="image_url" class="form-control" placeholder="assets/images/packages/wedding.png" style="margin-top:8px;">
+                    <div class="form-hint">Leave both blank to keep the current image.</div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Package Description</label>
@@ -590,3 +675,30 @@ Decoration: Floral & Table Backdrop"></textarea>
 </div>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
+
+<script>
+let currentAdminType = 'all';
+
+function filterAdminPackages(eventType) {
+    currentAdminType = eventType;
+    document.querySelectorAll('.pkg-filter-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.type === eventType);
+    });
+    applyAdminFilter();
+}
+
+function applyAdminFilter() {
+    const q = (document.getElementById('adminPkgSearch').value || '').toLowerCase();
+    document.querySelectorAll('#pkgTable .admin-pkg-row').forEach(row => {
+        const rowType = row.dataset.eventType;
+        const rowText = row.textContent.toLowerCase();
+
+        const matchType = (currentAdminType === 'all' || rowType === currentAdminType);
+        const matchSearch = (!q || rowText.includes(q));
+
+        row.style.display = (matchType && matchSearch) ? '' : 'none';
+    });
+}
+
+document.getElementById('adminPkgSearch').addEventListener('input', applyAdminFilter);
+</script>

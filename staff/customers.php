@@ -146,7 +146,7 @@ $customers = $db->query("
                 <div class="form-row" style="grid-template-columns:1fr 1fr;">
                     <div class="form-group">
                         <label class="form-label">First Name <span style="color:var(--accent-red);">*</span></label>
-                        <input type="text" name="first_name" class="form-control" placeholder="e.g. Maria" required>
+                        <input type="text" name="first_name" id="custFirstName" class="form-control" placeholder="e.g. Maria" required>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Middle Name</label>
@@ -155,11 +155,14 @@ $customers = $db->query("
                 </div>
                 <div class="form-group">
                     <label class="form-label">Surname <span style="color:var(--accent-red);">*</span></label>
-                    <input type="text" name="surname" class="form-control" placeholder="e.g. Santos" required>
+                    <input type="text" name="surname" id="custSurname" class="form-control" placeholder="e.g. Santos" required>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Email Address <span style="color:var(--accent-red);">*</span></label>
-                    <input type="email" name="email" class="form-control" placeholder="customer@email.com" required>
+                    <input type="email" name="email" id="custEmail" class="form-control" placeholder="mariasantos@crafthub.com" required>
+                    <div class="form-hint" style="color:#4ecdc4;margin-top:4px;font-size:0.78rem;">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-fills as <strong>firstnamesurname@crafthub.com</strong>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Phone Number</label>
@@ -171,8 +174,17 @@ $customers = $db->query("
                 </div>
                 <div class="form-group">
                     <label class="form-label">Temporary Password <span style="color:var(--accent-red);">*</span></label>
-                    <input type="text" name="password" class="form-control" placeholder="Min. 6 characters" required>
-                    <div class="form-hint"><i class="fa-solid fa-circle-info"></i> Provide this password to the customer for their first sign-in after Admin approval.</div>
+                    <input type="text" name="password" id="custPassword" class="form-control" placeholder="e.g. SantosMaria" required>
+                    <div style="margin-top:6px;font-size:0.8rem;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                        <span style="color:#f5a623;font-weight:600;"><i class="fa-solid fa-lightbulb"></i> Suggested Password:</span>
+                        <button type="button" id="btnUseSuggestPassCust" title="Click to fill password"
+                                style="background:rgba(245,166,35,0.15);border:1px solid rgba(245,166,35,0.35);color:#f5a623;padding:3px 10px;border-radius:12px;font-weight:700;font-family:monospace;cursor:pointer;transition:all 0.2s;">
+                            <i class="fa-solid fa-hand-pointer" style="font-size:0.75rem;"></i> <span id="passSuggestValCust">SurnameFirstname</span>
+                        </button>
+                        <span id="passApplyFeedbackCust" style="color:#27ae60;font-size:0.75rem;font-weight:700;display:none;">
+                            <i class="fa-solid fa-check"></i> Applied!
+                        </span>
+                    </div>
                 </div>
 
                 <div style="background:rgba(245,166,35,0.08);border:1px solid rgba(245,166,35,0.25);border-radius:var(--radius-sm);padding:12px;font-size:0.82rem;color:var(--text-secondary);">
@@ -189,3 +201,59 @@ $customers = $db->query("
 </div>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
+
+<script>
+(function() {
+    const fnInput      = document.getElementById('custFirstName');
+    const snInput      = document.getElementById('custSurname');
+    const emailInput   = document.getElementById('custEmail');
+    const passInput    = document.getElementById('custPassword');
+    const suggestBtn   = document.getElementById('btnUseSuggestPassCust');
+    const suggestVal   = document.getElementById('passSuggestValCust');
+    const feedbackSpan = document.getElementById('passApplyFeedbackCust');
+
+    if (fnInput && snInput && emailInput) {
+        let isCustomEmail = false;
+        let isCustomPass  = false;
+        emailInput.addEventListener('input', () => { isCustomEmail = emailInput.value.trim() !== ''; });
+        if (passInput) {
+            passInput.addEventListener('input', () => { isCustomPass = passInput.value.trim() !== ''; });
+        }
+
+        function genFields() {
+            const rawFn = fnInput.value.trim();
+            const rawSn = snInput.value.trim();
+            const fnClean = rawFn.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const snClean = rawSn.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+            if (!isCustomEmail && (fnClean || snClean)) {
+                emailInput.value = fnClean + snClean + '@crafthub.com';
+            }
+
+            const snCap = rawSn ? rawSn.charAt(0).toUpperCase() + rawSn.slice(1).toLowerCase().replace(/[^a-z0-9]/g, '') : 'Surname';
+            const fnCap = rawFn ? rawFn.charAt(0).toUpperCase() + rawFn.slice(1).toLowerCase().replace(/[^a-z0-9]/g, '') : 'Firstname';
+            const suggested = (rawSn || rawFn) ? (snCap + fnCap) : 'SurnameFirstname';
+
+            if (suggestVal) suggestVal.textContent = suggested;
+
+            if (passInput && !isCustomPass && (rawFn || rawSn)) {
+                passInput.value = suggested;
+            }
+        }
+
+        fnInput.addEventListener('input', genFields);
+        snInput.addEventListener('input', genFields);
+
+        if (suggestBtn && passInput) {
+            suggestBtn.addEventListener('click', () => {
+                passInput.value = suggestVal.textContent;
+                isCustomPass = false;
+                if (feedbackSpan) {
+                    feedbackSpan.style.display = 'inline';
+                    setTimeout(() => { feedbackSpan.style.display = 'none'; }, 1500);
+                }
+            });
+        }
+    }
+})();
+</script>
