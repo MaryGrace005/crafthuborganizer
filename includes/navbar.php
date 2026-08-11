@@ -35,6 +35,7 @@ if ($_SESSION['user_role'] === 'admin') {
         ['href' => APP_URL . '/staff/bills.php',           'icon' => 'fa-file-invoice-dollar', 'label' => 'Bills & Balances'],
         ['href' => APP_URL . '/staff/collection.php',      'icon' => 'fa-money-bill-wave',     'label' => 'Payments Log'],
         ['href' => APP_URL . '/staff/reports.php',         'icon' => 'fa-chart-line',          'label' => 'Analytics & Reports'],
+        ['href' => APP_URL . '/staff/profile.php',         'icon' => 'fa-user',               'label' => 'Profile'],
     ];
 } elseif ($_SESSION['user_role'] === 'customer') {
     $navLinks = [
