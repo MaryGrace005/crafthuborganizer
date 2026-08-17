@@ -63,7 +63,7 @@ $pkgFeatured = [false, true, false]; // middle = featured
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 
     <!-- Stylesheets -->
-    <link rel="stylesheet" href="<?= APP_URL ?>/assets/css/landing.css">
+    <link rel="stylesheet" href="<?= APP_URL ?>/assets/css/landing.css?v=<?= time() ?>">
 
     <style>
         /* Inline reset so landing page doesn't inherit sidebar styles */
@@ -501,22 +501,66 @@ $pkgFeatured = [false, true, false]; // middle = featured
      FOOTER
 ══════════════════════════════════════ -->
 <footer class="landing-footer">
-    <div class="landing-footer-inner">
-        <a href="<?= APP_URL ?>/landing.php" class="footer-logo">
-            <div class="footer-logo-icon"><i class="fa-solid fa-palette"></i></div>
-            <span class="footer-logo-text">CraftHub Organizer</span>
-        </a>
 
-        <p class="footer-copy">&copy; <?= date('Y') ?> CraftHub Organizer. All rights reserved.</p>
+    <div class="footer-glow-line"></div>
 
-        <ul class="footer-links">
-            <li><a href="#features">Features</a></li>
-            <li><a href="#packages">Packages</a></li>
-            <li><a href="<?= APP_URL ?>/login.php">Login</a></li>
-            <li><a href="<?= APP_URL ?>/register.php">Register</a></li>
-        </ul>
+    <div class="footer-wrapper">
+
+        <!-- ── Two-column contact grid only ── -->
+        <div class="footer-contacts-grid">
+
+            <div class="fc-item">
+                <div class="fc-icon-wrap fc-red">
+                    <i class="fa-solid fa-location-dot"></i>
+                </div>
+                <div class="fc-content">
+                    <div class="fc-label">Our Location</div>
+                    <div class="fc-value">123 Craft Avenue,<br>Bohol, Philippines</div>
+                </div>
+            </div>
+
+            <div class="fc-item">
+                <div class="fc-icon-wrap fc-teal">
+                    <i class="fa-solid fa-phone-volume"></i>
+                </div>
+                <div class="fc-content">
+                    <div class="fc-label">Phone Number</div>
+                    <a href="tel:+639123456789" class="fc-value">+63 912 345 6789</a>
+                </div>
+            </div>
+
+            <div class="fc-item">
+                <div class="fc-icon-wrap fc-amber">
+                    <i class="fa-solid fa-envelope-open-text"></i>
+                </div>
+                <div class="fc-content">
+                    <div class="fc-label">Email Address</div>
+                    <a href="mailto:hello@crafthuborganizer.com" class="fc-value">hello@crafthuborganizer.com</a>
+                </div>
+            </div>
+
+            <div class="fc-item">
+                <div class="fc-icon-wrap fc-purple">
+                    <i class="fa-solid fa-clock"></i>
+                </div>
+                <div class="fc-content">
+                    <div class="fc-label">Office Hours</div>
+                    <div class="fc-value">Mon – Sat<br>8:00 AM – 6:00 PM</div>
+                </div>
+            </div>
+
+        </div>
+
     </div>
+
+    <!-- Bottom bar -->
+    <div class="footer-bottom">
+        <p class="footer-copy">&copy; <?= date('Y') ?> CraftHub Organizer. All rights reserved.</p>
+        <p class="footer-made-with">Made with <i class="fa-solid fa-heart"></i> for every craft moment.</p>
+    </div>
+
 </footer>
+
 
 <!-- Landing Page JS -->
 <script src="<?= APP_URL ?>/assets/js/landing.js"></script>
