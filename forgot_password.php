@@ -14,8 +14,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $type    = 'error';
     } else {
         $db   = getDB();
-        $stmt = $db->prepare("SELECT user_id AS id, user_id, name FROM users WHERE email = ? AND status = 'active'");
-        $stmt->execute([$email]);
+        $stmt = $db->prepare("SELECT user_id AS id, user_id, name FROM users WHERE (email = ? OR login_email = ?) AND status = 'active'");
+        $stmt->execute([$email, $email]);
         $user = $stmt->fetch();
 
         if ($user) {

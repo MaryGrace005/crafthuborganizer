@@ -9,21 +9,45 @@ $db     = getDB();
 $errors = [];
 $success = '';
 
+$userFirstName  = $user['first_name'] ?? '';
+$userMiddleName = $user['middle_name'] ?? '';
+$userSurname    = $user['surname'] ?? '';
+$userGender     = $user['gender'] ?? '';
+
+if (empty($userFirstName) && !empty($user['name'])) {
+    $parts = explode(' ', trim($user['name']));
+    if (count($parts) === 1) {
+        $userFirstName = $parts[0];
+    } else if (count($parts) === 2) {
+        $userFirstName = $parts[0];
+        $userSurname   = $parts[1];
+    } else {
+        $userFirstName  = $parts[0];
+        $userMiddleName = implode(' ', array_slice($parts, 1, -1));
+        $userSurname    = end($parts);
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
     if ($action === 'update_profile') {
-        $name    = sanitize($_POST['name']    ?? '');
-        $phone   = sanitize($_POST['phone']   ?? '');
-        $address = sanitize($_POST['address'] ?? '');
+        $firstName  = sanitize($_POST['first_name']  ?? '');
+        $middleName = sanitize($_POST['middle_name'] ?? '');
+        $surname    = sanitize($_POST['surname']     ?? '');
+        $gender     = sanitize($_POST['gender']      ?? '');
+        $phone      = sanitize($_POST['phone']       ?? '');
+        $address    = sanitize($_POST['address']     ?? '');
 
-        if (empty($name)) $errors[] = 'Name is required.';
+        if (empty($firstName)) $errors[] = 'First name is required.';
+        if (empty($surname))   $errors[] = 'Surname is required.';
 
         if (empty($errors)) {
-            $userId = $user['user_id'] ?? $user['id'];
-            $stmt = $db->prepare("UPDATE users SET name = ?, contact_no = ?, address = ? WHERE user_id = ?");
-            $stmt->execute([$name, $phone, $address, $userId]);
-            $_SESSION['user_name'] = $name;
+            $fullName = trim(implode(' ', array_filter([$firstName, $middleName, $surname])));
+            $userId   = $user['user_id'] ?? $user['id'];
+            $stmt     = $db->prepare("UPDATE users SET name = ?, first_name = ?, middle_name = ?, surname = ?, gender = ?, contact_no = ?, address = ? WHERE user_id = ?");
+            $stmt->execute([$fullName, $firstName, $middleName, $surname, $gender, $phone, $address, $userId]);
+            $_SESSION['user_name'] = $fullName;
             logAudit($userId, 'UPDATE_PROFILE', 'Updated profile information', 'users');
             setFlash('success', 'Profile updated successfully!');
             redirect(APP_URL . '/customer/profile.php');
@@ -89,10 +113,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <form method="POST" action="">
             <input type="hidden" name="action" value="update_profile">
 
-            <div class="form-group">
-                <label class="form-label" for="name">Full Name</label>
-                <input type="text" id="name" name="name" class="form-control"
-                       value="<?= htmlspecialchars($user['name']) ?>" required>
+            <div class="form-row" style="grid-template-columns:1fr 1fr;gap:14px;">
+                <div class="form-group">
+                    <label class="form-label" for="first_name">First Name <span style="color:#e94560;">*</span></label>
+                    <input type="text" id="first_name" name="first_name" class="form-control"
+                           value="<?= htmlspecialchars($userFirstName) ?>" placeholder="First Name" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="middle_name">Middle Name</label>
+                    <input type="text" id="middle_name" name="middle_name" class="form-control"
+                           value="<?= htmlspecialchars($userMiddleName) ?>" placeholder="Optional">
+                </div>
+            </div>
+
+            <div class="form-row" style="grid-template-columns:1fr 1fr;gap:14px;">
+                <div class="form-group">
+                    <label class="form-label" for="surname">Surname <span style="color:#e94560;">*</span></label>
+                    <input type="text" id="surname" name="surname" class="form-control"
+                           value="<?= htmlspecialchars($userSurname) ?>" placeholder="Surname" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="gender">Gender</label>
+                    <select id="gender" name="gender" class="form-control">
+                        <option value="">— Select Gender —</option>
+                        <option value="Male" <?= $userGender === 'Male' ? 'selected' : '' ?>>Male</option>
+                        <option value="Female" <?= $userGender === 'Female' ? 'selected' : '' ?>>Female</option>
+                        <option value="Prefer not to say" <?= $userGender === 'Prefer not to say' ? 'selected' : '' ?>>Prefer not to say</option>
+                    </select>
+                </div>
             </div>
 
             <div class="form-group">
@@ -106,7 +154,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <div class="form-group">
                 <label class="form-label" for="phone">Phone Number</label>
                 <input type="tel" id="phone" name="phone" class="form-control"
-                       value="<?= htmlspecialchars($user['phone'] ?? '') ?>" placeholder="09XXXXXXXXX">
+                       value="<?= htmlspecialchars($user['contact_no'] ?? $user['phone'] ?? '') ?>" placeholder="09XXXXXXXXX">
             </div>
 
             <div class="form-group">

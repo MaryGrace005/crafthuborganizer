@@ -510,42 +510,42 @@ $pkgFeatured = [false, true, false]; // middle = featured
         <div class="footer-contacts-grid">
 
             <div class="fc-item">
-                <div class="fc-icon-wrap fc-red">
+                <div class="fc-icon-circle">
                     <i class="fa-solid fa-location-dot"></i>
                 </div>
                 <div class="fc-content">
-                    <div class="fc-label">Our Location</div>
-                    <div class="fc-value">123 Craft Avenue,<br>Bohol, Philippines</div>
+                    <span class="fc-label">Our Location</span>
+                    <span class="fc-value">123 Craft Avenue, Bohol, Philippines</span>
                 </div>
             </div>
 
             <div class="fc-item">
-                <div class="fc-icon-wrap fc-teal">
-                    <i class="fa-solid fa-phone-volume"></i>
+                <div class="fc-icon-circle">
+                    <i class="fa-solid fa-phone"></i>
                 </div>
                 <div class="fc-content">
-                    <div class="fc-label">Phone Number</div>
+                    <span class="fc-label">Phone Number</span>
                     <a href="tel:+639123456789" class="fc-value">+63 912 345 6789</a>
                 </div>
             </div>
 
             <div class="fc-item">
-                <div class="fc-icon-wrap fc-amber">
-                    <i class="fa-solid fa-envelope-open-text"></i>
+                <div class="fc-icon-circle">
+                    <i class="fa-solid fa-envelope"></i>
                 </div>
                 <div class="fc-content">
-                    <div class="fc-label">Email Address</div>
+                    <span class="fc-label">Email Address</span>
                     <a href="mailto:hello@crafthuborganizer.com" class="fc-value">hello@crafthuborganizer.com</a>
                 </div>
             </div>
 
             <div class="fc-item">
-                <div class="fc-icon-wrap fc-purple">
+                <div class="fc-icon-circle">
                     <i class="fa-solid fa-clock"></i>
                 </div>
                 <div class="fc-content">
-                    <div class="fc-label">Office Hours</div>
-                    <div class="fc-value">Mon – Sat<br>8:00 AM – 6:00 PM</div>
+                    <span class="fc-label">Office Hours</span>
+                    <span class="fc-value">Mon – Sat &nbsp;·&nbsp; 8:00 AM – 6:00 PM</span>
                 </div>
             </div>
 

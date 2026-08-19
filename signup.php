@@ -27,14 +27,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === '1') {
         $name       = trim(implode(' ', array_filter([$firstName, $middleName, $surname])));
         $email      = sanitize($_POST['email']       ?? '');
         $phone      = sanitize($_POST['phone']       ?? '');
-        $password   = $_POST['password']             ?? '';
-        $confirm    = $_POST['confirm_password']     ?? '';
-
         if (!$firstName) $errors[]       = 'First name is required.';
         if (!$surname)   $errors[]       = 'Surname is required.';
         if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = 'A valid email address is required.';
-        if (strlen($password) < 8)       $errors[] = 'Password must be at least 8 characters.';
-        if ($password !== $confirm)      $errors[] = 'Passwords do not match.';
 
         if (empty($errors)) {
             // Check email uniqueness
@@ -46,7 +41,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === '1') {
         }
 
         if (empty($errors)) {
-            $hash = password_hash($password, PASSWORD_DEFAULT);
+            // Auto-generate a secure random password (admin sets it later)
+            $randomPassword = bin2hex(random_bytes(12));
+            $hash = password_hash($randomPassword, PASSWORD_DEFAULT);
             $db->prepare("INSERT INTO users (name, email, password, contact_no, role, status) VALUES (?, ?, ?, ?, 'customer', 'pending_approval')")
                ->execute([$name, $email, $hash, $phone]);
             $newUserId = (int)$db->lastInsertId();
@@ -140,7 +137,7 @@ if ($urlStep === 2 && isset($_SESSION['signup_user_id'])) {
                         </div>
                         <div>
                             <div style="font-weight:700;font-size:0.9rem;color:<?= $step >= 1 ? '#4ecdc4' : 'rgba(255,255,255,0.5)' ?>;">Account Setup</div>
-                            <div style="font-size:0.78rem;color:rgba(255,255,255,0.45);">Email, name & password</div>
+                            <div style="font-size:0.78rem;color:rgba(255,255,255,0.45);">Email, name & contact info</div>
                         </div>
                     </div>
                     <div style="display:flex;align-items:center;gap:14px;padding:14px 18px;border-radius:14px;background:<?= $step >= 2 ? 'rgba(245,166,35,0.12)' : 'rgba(255,255,255,0.04)' ?>;border:1px solid <?= $step >= 2 ? 'rgba(245,166,35,0.3)' : 'rgba(255,255,255,0.06)' ?>;">
@@ -225,16 +222,7 @@ if ($urlStep === 2 && isset($_SESSION['signup_user_id'])) {
                            value="<?= htmlspecialchars($_POST['phone'] ?? '') ?>">
                 </div>
 
-                <div class="form-row" style="grid-template-columns:1fr 1fr;gap:14px;">
-                    <div class="form-group">
-                        <label class="form-label">Password <span style="color:#e94560;">*</span></label>
-                        <input type="password" name="password" class="form-control" placeholder="Min. 8 characters" required autocomplete="new-password">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Confirm Password <span style="color:#e94560;">*</span></label>
-                        <input type="password" name="confirm_password" class="form-control" placeholder="Repeat password" required>
-                    </div>
-                </div>
+
 
                 <button type="submit" class="btn btn-primary btn-block" style="height:52px;font-size:1rem;font-weight:700;border-radius:14px;margin-top:8px;background:linear-gradient(135deg,#4ecdc4,#2da99e);box-shadow:0 8px 24px rgba(78,205,196,0.35);border:none;">
                     <i class="fa-solid fa-arrow-right"></i> Continue to Event Profile

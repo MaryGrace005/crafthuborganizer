@@ -183,8 +183,36 @@ if (columnExists($db, 'users', 'id_code')) {
     }
 }
 
+// ── 7b. temp_password column on users (cleared on approval) ──────────────
+if (columnExists($db, 'users', 'temp_password')) {
+    $results[] = ['label' => 'temp_password on users', 'ok' => true, 'msg' => 'Already exists.'];
+} else {
+    try {
+        $db->exec("ALTER TABLE users ADD COLUMN temp_password VARCHAR(255) NULL AFTER id_code");
+        $results[] = ['label' => 'temp_password on users', 'ok' => true, 'msg' => 'Column added. Stores plain-text password until account is approved.'];
+    } catch (PDOException $e) {
+        $results[] = ['label' => 'temp_password on users', 'ok' => false, 'msg' => $e->getMessage()];
+    }
+}
+
+// ── 7c. login_email column on users (admin-assigned Gmail for login) ──────
+if (columnExists($db, 'users', 'login_email')) {
+    $results[] = ['label' => 'login_email on users', 'ok' => true, 'msg' => 'Already exists.'];
+} else {
+    try {
+        $db->exec("ALTER TABLE users ADD COLUMN login_email VARCHAR(191) NULL AFTER temp_password");
+        $results[] = ['label' => 'login_email on users', 'ok' => true, 'msg' => 'Column added. Stores admin-assigned Gmail for customer login.'];
+    } catch (PDOException $e) {
+        $results[] = ['label' => 'login_email on users', 'ok' => false, 'msg' => $e->getMessage()];
+    }
+}
+
 // ── 8. Profiling columns on users ─────────────────────────────────────────
 $profilingCols = [
+    'first_name'         => "VARCHAR(100) NULL",
+    'middle_name'        => "VARCHAR(100) NULL",
+    'surname'            => "VARCHAR(100) NULL",
+    'gender'             => "VARCHAR(50) NULL",
     'business_name'      => "VARCHAR(150) NULL AFTER id_code",
     'event_type_interest'=> "VARCHAR(100) NULL",
     'guest_count_est'    => "INT UNSIGNED NULL",

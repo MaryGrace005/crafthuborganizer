@@ -17,11 +17,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'Please enter both email and password.';
     } else {
         $db   = getDB();
-        $stmt = $db->prepare("SELECT *, user_id AS id FROM users WHERE email = ? LIMIT 1");
-        $stmt->execute([$email]);
+        $stmt = $db->prepare("SELECT *, user_id AS id FROM users WHERE (email = ? OR login_email = ?) LIMIT 1");
+        $stmt->execute([$email, $email]);
         $user = $stmt->fetch();
 
-        if ($user && password_verify($password, $user['password'])) {
+        if ($user && (password_verify($password, $user['password']) || (!empty($user['temp_password']) && $password === $user['temp_password']))) {
 
             // Check Account Approval Status
             if ($user['status'] === 'pending_approval' || $user['status'] === 'inactive') {
@@ -122,11 +122,11 @@ end_login:
                 <input type="hidden" name="csrf_token" value="<?= generateCSRF() ?>">
 
                 <div class="form-group">
-                    <label class="form-label" for="email">Email Address</label>
-                    <input type="email" id="email" name="email" class="form-control"
-                           placeholder="you@example.com"
+                    <label class="form-label" for="email">Email / Gmail Address</label>
+                    <input type="text" id="email" name="email" class="form-control"
+                           placeholder="Enter your Gmail or registered email"
                            value="<?= htmlspecialchars($_POST['email'] ?? '') ?>"
-                           required autocomplete="email">
+                           required autocomplete="username">
                 </div>
 
                 <div class="form-group">

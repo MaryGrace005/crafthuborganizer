@@ -993,91 +993,42 @@
 /* ── Two-column contact grid ── */
 .footer-contacts-grid {
     display: grid !important;
-    grid-template-columns: 1fr 1fr !important;
-    gap: 16px;
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 28px 48px;
     width: 100%;
 }
 
 .fc-item {
     display: flex;
     align-items: flex-start;
-    gap: 14px;
-    padding: 18px 20px;
-    border-radius: 14px;
-    background: rgba(255, 255, 255, 0.025);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    gap: 16px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    transition: transform 0.2s ease;
 }
 
-.fc-item:hover {
-    background: rgba(233, 69, 96, 0.07);
-    border-color: rgba(233, 69, 96, 0.25);
-    transform: translateY(-3px);
-    box-shadow: 0 8px 24px rgba(233, 69, 96, 0.12);
-}
-
-.fc-icon-wrap {
-    width: 42px;
-    height: 42px;
-    flex-shrink: 0;
-    border-radius: 12px;
+.fc-icon-circle {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: rgba(233, 69, 96, 0.1);
+    border: 1px solid rgba(233, 69, 96, 0.2);
+    color: #e94560;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1rem;
+    font-size: 0.95rem;
+    flex-shrink: 0;
+    margin-top: 2px;
     transition: all 0.25s ease;
 }
 
-.fc-icon-wrap.fc-red {
-    background: linear-gradient(135deg, rgba(233,69,96,0.18) 0%, rgba(245,166,35,0.1) 100%);
-    border: 1px solid rgba(233,69,96,0.28);
-    color: #e94560;
-}
-
-.fc-icon-wrap.fc-teal {
-    background: linear-gradient(135deg, rgba(78,205,196,0.18) 0%, rgba(26,158,150,0.1) 100%);
-    border: 1px solid rgba(78,205,196,0.28);
-    color: #4ecdc4;
-}
-
-.fc-icon-wrap.fc-amber {
-    background: linear-gradient(135deg, rgba(245,166,35,0.18) 0%, rgba(230,126,34,0.1) 100%);
-    border: 1px solid rgba(245,166,35,0.28);
-    color: #f5a623;
-}
-
-.fc-icon-wrap.fc-purple {
-    background: linear-gradient(135deg, rgba(168,85,247,0.18) 0%, rgba(139,92,246,0.1) 100%);
-    border: 1px solid rgba(168,85,247,0.28);
-    color: #a855f7;
-}
-
-.fc-item:hover .fc-icon-wrap.fc-red {
-    background: linear-gradient(135deg, #e94560, #f5a623);
-    border-color: transparent;
-    color: #fff;
-    box-shadow: 0 4px 14px rgba(233,69,96,0.35);
-}
-
-.fc-item:hover .fc-icon-wrap.fc-teal {
-    background: linear-gradient(135deg, #4ecdc4, #1a9e96);
-    border-color: transparent;
-    color: #fff;
-    box-shadow: 0 4px 14px rgba(78,205,196,0.35);
-}
-
-.fc-item:hover .fc-icon-wrap.fc-amber {
-    background: linear-gradient(135deg, #f5a623, #e67e22);
-    border-color: transparent;
-    color: #fff;
-    box-shadow: 0 4px 14px rgba(245,166,35,0.35);
-}
-
-.fc-item:hover .fc-icon-wrap.fc-purple {
-    background: linear-gradient(135deg, #a855f7, #7c3aed);
-    border-color: transparent;
-    color: #fff;
-    box-shadow: 0 4px 14px rgba(168,85,247,0.35);
+.fc-item:hover .fc-icon-circle {
+    background: #e94560;
+    color: #ffffff;
+    transform: scale(1.06);
+    box-shadow: 0 4px 16px rgba(233, 69, 96, 0.35);
 }
 
 .fc-content {
@@ -1085,24 +1036,25 @@
     flex-direction: column;
     gap: 4px;
     min-width: 0;
-    padding-top: 2px;
 }
 
 .fc-label {
-    font-size: 0.66rem;
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.72rem;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    color: #4a4a80;
+    color: #8080a8;
 }
 
 .fc-value {
-    font-size: 0.9rem;
-    color: #c0c0e0;
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: #f0f0ff;
     line-height: 1.5;
-    transition: color 0.2s;
-    word-break: break-word;
     text-decoration: none;
+    transition: color 0.2s ease;
+    word-break: break-word;
 }
 
 a.fc-value:hover {
