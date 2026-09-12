@@ -171,16 +171,6 @@ $pkgFeatured = [false, true, false]; // middle = featured
             book stunning venues, and manage your events — beautifully and effortlessly.
         </p>
 
-        <div class="hero-actions">
-            <a href="<?= APP_URL ?>/signup.php" class="btn-hero-primary" id="hero-cta-register">
-                <i class="fa-solid fa-user-plus"></i>
-                Create Your Account
-            </a>
-            <a href="<?= APP_URL ?>/login.php" class="btn-hero-secondary" id="hero-cta-login">
-                <i class="fa-solid fa-right-to-bracket"></i>
-                Sign In
-            </a>
-        </div>
 
         <div class="hero-stats">
             <div class="hero-stat">
