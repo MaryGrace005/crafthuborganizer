@@ -8,6 +8,11 @@ requireApproved();
 @include_once __DIR__ . '/../copy_images.php';
 
 $db = getDB();
+$userId = $_SESSION['user_id'] ?? 0;
+$ongoingBookings = getCustomerOngoingBookings($userId);
+$hasOngoingPayment = !empty($ongoingBookings);
+$totalOngoingBalance = array_sum(array_column($ongoingBookings, 'calculated_balance'));
+
 // Fetch active packages with slots count
 $packages = $db->query("
     SELECT p.*, p.package_id AS id, p.package_name AS name,
@@ -68,6 +73,36 @@ $catIcons = [
 </div>
 
 <?php displayFlash(); ?>
+
+<?php if ($hasOngoingPayment): ?>
+<!-- Ongoing Payment Restriction Banner -->
+<div class="card" style="margin-bottom:24px;background:linear-gradient(135deg,rgba(233,69,96,0.12),rgba(245,166,35,0.08));border:1.5px solid rgba(233,69,96,0.5);border-radius:18px;padding:22px 26px;position:relative;overflow:hidden;">
+    <div style="position:absolute;top:0;left:0;bottom:0;width:5px;background:linear-gradient(180deg,#e94560,#f5a623);"></div>
+    <div style="display:flex;align-items:flex-start;gap:18px;">
+        <div style="width:48px;height:48px;border-radius:14px;background:rgba(233,69,96,0.22);border:1px solid rgba(233,69,96,0.4);display:flex;align-items:center;justify-content:center;color:#e94560;font-size:1.35rem;flex-shrink:0;">
+            <i class="fa-solid fa-lock"></i>
+        </div>
+        <div style="flex:1;">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <h3 style="margin:0;font-size:1.2rem;font-weight:800;color:#fff;font-family:'Outfit',sans-serif;">Package Booking Temporarily Locked</h3>
+                <span style="background:rgba(233,69,96,0.2);color:#e94560;border:1px solid rgba(233,69,96,0.4);padding:3px 10px;border-radius:20px;font-size:0.75rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;">Full Payment Required</span>
+            </div>
+            <p style="color:var(--text-secondary);font-size:0.92rem;margin:8px 0 14px 0;line-height:1.5;">
+                You currently have an ongoing payment / unpaid balance of <strong style="color:#e94560;font-size:1.05rem;"><?= formatCurrency($totalOngoingBalance) ?></strong> across your existing booking(s).
+                CraftHub policy requires all ongoing bookings to be <strong>fully paid</strong> before you can purchase or book another package.
+            </p>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                <a href="<?= APP_URL ?>/customer/bookings.php" class="btn btn-primary btn-sm" style="background:#e94560;border-color:#e94560;">
+                    <i class="fa-solid fa-file-invoice-dollar"></i> View My Bookings &amp; Balances
+                </a>
+                <a href="<?= APP_URL ?>/customer/payment_history.php" class="btn btn-secondary btn-sm">
+                    <i class="fa-solid fa-receipt"></i> Payment History
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <!-- Event Type Category Filter Tabs -->
 <div style="display:flex;gap:10px;margin-bottom:24px;flex-wrap:wrap;align-items:center;">
@@ -279,6 +314,10 @@ $catIcons = [
                 <?php if ($isFull): ?>
                     <button class="btn btn-secondary btn-block" disabled style="cursor:not-allowed;opacity:0.6;">
                         <i class="fa-solid fa-ban"></i> Fully Booked
+                    </button>
+                <?php elseif ($hasOngoingPayment): ?>
+                    <button class="btn btn-secondary btn-block" disabled style="cursor:not-allowed;opacity:0.85;background:rgba(233,69,96,0.15);border:1px solid rgba(233,69,96,0.35);color:#e94560;font-weight:700;" title="You must settle all ongoing payments before booking a new package.">
+                        <i class="fa-solid fa-lock"></i> Full Payment Required
                     </button>
                 <?php else: ?>
                     <a href="<?= APP_URL ?>/customer/booking.php?package_id=<?= $pkg['id'] ?>" class="btn btn-primary btn-block">

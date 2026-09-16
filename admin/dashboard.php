@@ -7,22 +7,9 @@ $stats = getDashboardStats('admin');
 $db    = getDB();
 $adminId = $_SESSION['user_id'] ?? 0;
 
-// Handle POST Approve directly from dashboard
+// Dashboard does NOT process approvals inline — redirect to full approvals workflow
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'approve') {
-    $uid = (int)($_POST['user_id'] ?? 0);
-    $target = $db->prepare("SELECT * FROM users WHERE user_id = ? AND status IN ('pending_approval','inactive')");
-    $target->execute([$uid]);
-    $targetUser = $target->fetch();
-    if ($targetUser) {
-        $idCode = generateAccountIdCode();
-        $db->prepare("UPDATE users SET status = 'active', id_code = ? WHERE user_id = ?")
-           ->execute([$idCode, $uid]);
-        logAudit($adminId, 'APPROVE_USER', "Admin approved account #{$uid} from dashboard → {$idCode}", 'users');
-        setFlash('success', "Account approved! Account ID: <strong>{$idCode}</strong>");
-    } else {
-        setFlash('error', 'Account not found or already processed.');
-    }
-    redirect(APP_URL . '/admin/dashboard.php');
+    redirect(APP_URL . '/admin/approvals.php');
 }
 
 // Recent bookings
@@ -63,43 +50,41 @@ $pendingAccountsCount = count($pendingUsers);
 <?php displayFlash(); ?>
 
 <?php if ($pendingAccountsCount > 0): ?>
-<div class="card" style="border:1px solid rgba(245,166,35,0.4);margin-bottom:24px;background:rgba(245,166,35,0.04);">
+<div class="card" style="border:1px solid rgba(245,166,35,0.5);margin-bottom:24px;background:rgba(245,166,35,0.05);">
     <div class="card-header" style="border-bottom:1px solid rgba(245,166,35,0.2);">
-        <h2 class="card-title" style="color:var(--accent-gold);"><i class="fa-solid fa-user-clock"></i> <?= $pendingAccountsCount ?> Customer Account<?= $pendingAccountsCount > 1 ? 's' : '' ?> Awaiting Admin Approval</h2>
-        <a href="<?= APP_URL ?>/admin/users.php?role=pending" class="btn btn-warning btn-sm">View All in Manage Users</a>
+        <h2 class="card-title" style="color:var(--accent-gold);"><i class="fa-solid fa-user-clock"></i> <?= $pendingAccountsCount ?> Customer Account<?= $pendingAccountsCount > 1 ? 's' : '' ?> Awaiting Approval</h2>
+        <a href="<?= APP_URL ?>/admin/approvals.php" class="btn btn-warning btn-sm"><i class="fa-solid fa-arrow-right"></i> Go to Approvals</a>
     </div>
-    <div class="table-wrapper">
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>Customer Name</th>
-                    <th>Email Address</th>
-                    <th>Phone</th>
-                    <th>Registered Date</th>
-                    <th>Action</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($pendingUsers as $pu): ?>
-                <tr>
-                    <td><strong style="color:#fff;"><?= htmlspecialchars($pu['name']) ?></strong></td>
-                    <td><?= htmlspecialchars($pu['email']) ?></td>
-                    <td><?= htmlspecialchars($pu['contact_no'] ?? '—') ?></td>
-                    <td style="font-size:0.82rem;color:var(--text-secondary);"><?= formatDate($pu['created_at']) ?></td>
-                    <td>
-                        <form method="POST" style="display:inline;margin:0;">
-                            <input type="hidden" name="action" value="approve">
-                            <input type="hidden" name="user_id" value="<?= $pu['user_id'] ?>">
-                            <button type="submit" class="btn btn-success btn-sm" title="Approve Account"
-                                    data-confirm="Approve and activate customer account for <?= htmlspecialchars($pu['name']) ?>?">
-                                <i class="fa-solid fa-check"></i> Approve &amp; Activate
-                            </button>
-                        </form>
-                    </td>
-                </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
+    <div style="padding:16px 20px;">
+        <div style="display:flex;align-items:flex-start;gap:16px;">
+            <div style="width:48px;height:48px;border-radius:50%;background:rgba(245,166,35,0.15);border:2px solid rgba(245,166,35,0.35);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                <i class="fa-solid fa-bell" style="color:#f5a623;font-size:1.3rem;"></i>
+            </div>
+            <div style="flex:1;">
+                <div style="font-weight:700;color:#fff;margin-bottom:6px;font-size:1rem;">
+                    <?= $pendingAccountsCount ?> account<?= $pendingAccountsCount > 1 ? 's need' : ' needs' ?> your review
+                </div>
+                <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:14px;line-height:1.5;">
+                    Each approval requires setting a <strong>login email (Gmail)</strong> and <strong>temporary password</strong> so the customer can access the system. Use the full Approvals page to complete this process correctly.
+                </div>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                    <?php foreach ($pendingUsers as $pu): ?>
+                    <a href="<?= APP_URL ?>/admin/approvals.php"
+                       style="display:inline-flex;align-items:center;gap:8px;background:rgba(245,166,35,0.1);border:1px solid rgba(245,166,35,0.3);border-radius:8px;padding:7px 14px;text-decoration:none;transition:all 0.2s;"
+                       onmouseover="this.style.background='rgba(245,166,35,0.2)'" onmouseout="this.style.background='rgba(245,166,35,0.1)'">
+                        <span style="width:28px;height:28px;border-radius:50%;background:rgba(245,166,35,0.25);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                            <i class="fa-solid fa-user" style="color:#f5a623;font-size:0.7rem;"></i>
+                        </span>
+                        <div>
+                            <div style="font-weight:700;color:#fff;font-size:0.83rem;"><?= htmlspecialchars($pu['name']) ?></div>
+                            <div style="font-size:0.72rem;color:rgba(255,255,255,0.4);"><?= formatDate($pu['created_at']) ?></div>
+                        </div>
+                        <i class="fa-solid fa-chevron-right" style="color:rgba(245,166,35,0.5);font-size:0.7rem;margin-left:4px;"></i>
+                    </a>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 <?php endif; ?>
@@ -127,13 +112,13 @@ $pendingAccountsCount = count($pendingUsers);
             <div class="stat-label">Total Bookings</div>
         </div>
     </div>
-    <div class="stat-card" style="--stat-color:#27ae60;">
+    <a href="<?= APP_URL ?>/admin/bills.php" class="stat-card" style="--stat-color:#27ae60;text-decoration:none;cursor:pointer;">
         <div class="stat-icon" style="background:rgba(39,174,96,0.2);color:#27ae60;"><i class="fa-solid fa-peso-sign"></i></div>
         <div class="stat-info">
             <div class="stat-value"><?= formatCurrency($stats['total_revenue']) ?></div>
-            <div class="stat-label">Total Revenue</div>
+            <div class="stat-label">Total Revenue <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:0.7rem;opacity:0.7;"></i></div>
         </div>
-    </div>
+    </a>
     <div class="stat-card" style="--stat-color:#9b59b6;">
         <div class="stat-icon" style="background:rgba(155,89,182,0.2);color:#9b59b6;"><i class="fa-solid fa-clock"></i></div>
         <div class="stat-info">
@@ -165,11 +150,11 @@ $pendingAccountsCount = count($pendingUsers);
                 <tbody>
                     <?php foreach ($recent as $b): ?>
                     <tr>
-                        <td><span style="color:var(--accent-teal);font-size:0.82rem;"><?= htmlspecialchars(getBookingRef($b)) ?></span></td>
+                        <td><a href="<?= APP_URL ?>/admin/bills.php?search=<?= urlencode(getBookingRef($b)) ?>" style="color:var(--accent-teal);font-size:0.82rem;font-weight:700;text-decoration:none;" title="Click to view bill"><?= htmlspecialchars(getBookingRef($b)) ?></a></td>
                         <td><?= htmlspecialchars($b['customer_name']) ?></td>
                         <td><?= htmlspecialchars($b['package_name']) ?></td>
                         <td><?= statusBadge($b['status']) ?></td>
-                        <td><?= formatCurrency($b['total_amount']) ?></td>
+                        <td><a href="<?= APP_URL ?>/admin/bills.php?search=<?= urlencode(getBookingRef($b)) ?>" style="color:var(--text-primary);text-decoration:none;font-weight:600;" title="Click to view bill"><?= formatCurrency($b['total_amount']) ?></a></td>
                     </tr>
                     <?php endforeach; ?>
                 </tbody>

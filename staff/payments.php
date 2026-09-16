@@ -1,17 +1,18 @@
 <?php
 $pageTitle = 'Payments';
 require_once __DIR__ . '/../includes/header.php';
-requireRole(['staff', 'cashier']);
+requireRole(['admin', 'staff', 'cashier']);
 
 $db     = getDB();
 $filter = sanitize($_GET['filter'] ?? 'unpaid');
-$allowed = ['all','unpaid','partial','paid'];
+$allowed = ['all','unpaid','partial','paid','pending'];
 if (!in_array($filter, $allowed)) $filter = 'unpaid';
 
 $sql = "SELECT b.*, b.booking_id AS id, u.name AS customer_name, u.email AS customer_email, u.contact_no AS customer_phone,
                p.package_name AS package_name, v.venue_name AS venue_name,
                (SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE booking_id = b.booking_id) AS calc_paid,
-               (SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE booking_id = b.booking_id AND payment_type = 'downpayment') AS downpayment_paid
+               (SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE booking_id = b.booking_id AND payment_type = 'downpayment') AS downpayment_paid,
+               (SELECT MAX(payment_id) FROM payments WHERE booking_id = b.booking_id) AS latest_payment_id
         FROM bookings b
         JOIN users u ON b.customer_id = u.user_id
         JOIN packages p ON b.package_id = p.package_id
@@ -20,11 +21,13 @@ $sql = "SELECT b.*, b.booking_id AS id, u.name AS customer_name, u.email AS cust
 
 $params = [];
 if ($filter === 'unpaid') {
-    $sql .= " AND b.status = 'Pending'";
-} elseif ($filter === 'paid') {
-    $sql .= " AND b.status = 'Paid'";
+    $sql .= " AND b.status = 'Confirmed' AND (SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE booking_id = b.booking_id) = 0";
 } elseif ($filter === 'partial') {
-    $sql .= " AND b.status = 'Confirmed'";
+    $sql .= " AND (SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE booking_id = b.booking_id) > 0 AND (SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE booking_id = b.booking_id) < b.total_amount AND b.status != 'Pending'";
+} elseif ($filter === 'paid') {
+    $sql .= " AND (b.status = 'Paid' OR (SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE booking_id = b.booking_id) >= b.total_amount)";
+} elseif ($filter === 'pending') {
+    $sql .= " AND b.status = 'Pending'";
 }
 $sql .= " ORDER BY b.created_at DESC";
 
@@ -122,12 +125,23 @@ $bookings = $stmt->fetchAll();
                                 <a href="<?= APP_URL ?>/booking_images.php?booking_id=<?= $b['id'] ?>" class="btn btn-secondary btn-sm" style="white-space:nowrap;" title="View Event Photos &amp; Attachments">
                                     <i class="fa-solid fa-camera"></i> Photos
                                 </a>
-                                <?php if ($payStatus !== 'paid'): ?>
+                                <?php if ($b['status'] === 'Pending'): ?>
+                                    <span class="badge badge-warning" style="white-space:nowrap;" title="Cannot collect payment: Booking is still pending confirmation">
+                                        <i class="fa-solid fa-clock"></i> Pending Confirmation
+                                    </span>
+                                <?php elseif ($payStatus !== 'paid'): ?>
                                     <a href="<?= APP_URL ?>/staff/process_payment.php?id=<?= $b['id'] ?>"
                                        class="btn btn-success btn-sm" style="white-space:nowrap;">
                                         <i class="fa-solid fa-money-bill"></i> Collect Payment
                                     </a>
-                                <?php else: ?>
+                                <?php endif; ?>
+                                <?php if (!empty($b['latest_payment_id'])): ?>
+                                    <a href="<?= APP_URL ?>/receipt.php?id=<?= $b['latest_payment_id'] ?>" target="_blank"
+                                       class="btn btn-secondary btn-sm" style="white-space:nowrap;" title="View Official Receipt">
+                                        <i class="fa-solid fa-receipt"></i> Receipt
+                                    </a>
+                                <?php endif; ?>
+                                <?php if ($payStatus === 'paid' && empty($b['latest_payment_id'])): ?>
                                     <span class="badge badge-success" style="white-space:nowrap;"><i class="fa-solid fa-check"></i> Fully Paid</span>
                                 <?php endif; ?>
                             </div>

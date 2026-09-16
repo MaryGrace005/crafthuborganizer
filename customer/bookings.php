@@ -73,6 +73,7 @@ $bookings = $stmt->fetchAll();
                         <th>Downpayment</th>
                         <th>Total Paid</th>
                         <th>Remaining Balance</th>
+                        <th>Payment Due</th>
                         <th>Payment Status</th>
                         <th>Actions</th>
                     </tr>
@@ -84,10 +85,28 @@ $bookings = $stmt->fetchAll();
                         $downpayment = (float)($b['downpayment_paid'] ?? 0);
                         $balance     = max(0.0, $total - $paid);
                         $payStatus   = ($paid >= $total && $total > 0) ? 'paid' : ($paid > 0 ? 'partial' : 'unpaid');
+                        $dueDate     = getBookingPaymentDueDate($b);
+                        $dueTs       = strtotime($dueDate);
+                        $daysLeft    = (int)round(($dueTs - strtotime(date('Y-m-d'))) / 86400);
                     ?>
                     <tr style="white-space:nowrap;">
                         <td style="white-space:nowrap;">
                             <span class="ref-chip"><?= htmlspecialchars(getBookingRef($b)) ?></span>
+                            <div style="margin-top:5px;">
+                                <?php if (strtolower($b['status']) === 'pending'): ?>
+                                    <span class="badge badge-warning" style="font-size:0.7rem;padding:2px 7px;" title="Awaiting Cashier counter review & approval">
+                                        <i class="fa-solid fa-clock"></i> Awaiting Cashier Approval
+                                    </span>
+                                <?php else: ?>
+                                    <?= statusBadge($b['status']) ?>
+                                    <?php if (!empty($b['approved_at'])): ?>
+                                        <div style="font-size:0.68rem;color:#27ae60;margin-top:3px;display:flex;align-items:center;gap:3px;" title="Approved on <?= date('M d, Y g:i A', strtotime($b['approved_at'])) ?>">
+                                            <i class="fa-solid fa-circle-check"></i>
+                                            <span>Approved: <?= date('M d, Y g:i A', strtotime($b['approved_at'])) ?></span>
+                                        </div>
+                                    <?php endif; ?>
+                                <?php endif; ?>
+                            </div>
                         </td>
                         <td style="white-space:nowrap;">
                             <div style="font-weight:600;"><?= htmlspecialchars($b['package_name']) ?></div>
@@ -111,6 +130,23 @@ $bookings = $stmt->fetchAll();
                                 <strong style="color:var(--accent-red);"><?= formatCurrency($balance) ?></strong>
                             <?php else: ?>
                                 <span class="badge badge-success"><i class="fa-solid fa-check"></i> Fully Paid</span>
+                            <?php endif; ?>
+                        </td>
+                        <td style="white-space:nowrap;">
+                            <?php if ($balance <= 0): ?>
+                                <span class="badge badge-success" style="font-size:0.75rem;"><i class="fa-solid fa-check"></i> Settled</span>
+                            <?php elseif ($daysLeft < 0): ?>
+                                <div><strong style="color:#e94560;font-size:0.88rem;"><?= date('M d, Y', $dueTs) ?></strong></div>
+                                <span class="badge badge-danger" style="font-size:0.72rem;padding:2px 6px;">Overdue (<?= abs($daysLeft) ?>d)</span>
+                            <?php elseif ($daysLeft === 0): ?>
+                                <div><strong style="color:#f5a623;font-size:0.88rem;"><?= date('M d, Y', $dueTs) ?></strong></div>
+                                <span class="badge badge-warning" style="font-size:0.72rem;padding:2px 6px;">Due Today</span>
+                            <?php elseif ($daysLeft <= 7): ?>
+                                <div><strong style="color:#f5a623;font-size:0.88rem;"><?= date('M d, Y', $dueTs) ?></strong></div>
+                                <span class="badge badge-warning" style="font-size:0.72rem;padding:2px 6px;">Due in <?= $daysLeft ?> days</span>
+                            <?php else: ?>
+                                <div style="font-size:0.85rem;color:var(--text-primary);"><?= date('M d, Y', $dueTs) ?></div>
+                                <span style="font-size:0.72rem;color:var(--text-muted);"><?= $daysLeft ?> days left</span>
                             <?php endif; ?>
                         </td>
                         <td style="white-space:nowrap;"><?= statusBadge($payStatus) ?></td>

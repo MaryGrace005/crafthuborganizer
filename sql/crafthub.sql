@@ -57,17 +57,21 @@ CREATE TABLE IF NOT EXISTS bookings (
     package_id INT NOT NULL,
     venue_id INT NULL,
     event_date DATE NOT NULL,
+    payment_due_date DATE NULL,
     event_time TIME DEFAULT '09:00:00',
     event_type ENUM('Wedding','Birthday','Debut','Christening') NOT NULL DEFAULT 'Wedding',
     guest_count INT DEFAULT 1,
     total_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     amount_paid DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     status ENUM('Pending','Confirmed','Paid','Completed','Cancelled') DEFAULT 'Pending',
+    approved_at TIMESTAMP NULL DEFAULT NULL,
+    approved_by INT NULL,
     notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (customer_id) REFERENCES users(user_id) ON DELETE CASCADE,
     FOREIGN KEY (package_id) REFERENCES packages(package_id) ON DELETE CASCADE,
-    FOREIGN KEY (venue_id) REFERENCES venues(venue_id) ON DELETE SET NULL
+    FOREIGN KEY (venue_id) REFERENCES venues(venue_id) ON DELETE SET NULL,
+    FOREIGN KEY (approved_by) REFERENCES users(user_id) ON DELETE SET NULL
 );
 
 -- Table: booking_components (selected extras)
@@ -133,7 +137,10 @@ CREATE TABLE IF NOT EXISTS booking_images (
 -- (safe to run even if column already exists — IF NOT EXISTS prevents errors)
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS booking_reference VARCHAR(50) UNIQUE AFTER booking_id;
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_time TIME DEFAULT '09:00:00' AFTER event_date;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_due_date DATE NULL AFTER event_date;
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS amount_paid DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER total_amount;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP NULL DEFAULT NULL AFTER status;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS approved_by INT NULL AFTER approved_at;
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS notes TEXT AFTER status;
 
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'cash' AFTER payment_type;
@@ -172,3 +179,59 @@ INSERT IGNORE INTO bookings (booking_id, booking_reference, customer_id, package
 -- Seed Sample Payment
 INSERT IGNORE INTO payments (payment_id, booking_id, cashier_id, amount_paid, payment_type, payment_method, or_number) VALUES
 (1, 1, 2, 20000.00, 'downpayment', 'cash', 'OR-2026-0001');
+
+-- -------------------------------------------------------
+-- Venue Double-Booking Prevention & Fast Availability Index
+-- -------------------------------------------------------
+CREATE INDEX IF NOT EXISTS idx_venue_date ON bookings (venue_id, event_date);
+
+DROP TRIGGER IF EXISTS trg_prevent_double_booking_insert;
+DROP TRIGGER IF EXISTS trg_prevent_double_booking_update;
+
+DELIMITER $$
+
+CREATE TRIGGER trg_prevent_double_booking_insert
+BEFORE INSERT ON bookings
+FOR EACH ROW
+BEGIN
+    DECLARE conflict_count INT DEFAULT 0;
+
+    IF NEW.venue_id IS NOT NULL THEN
+        SELECT COUNT(*) INTO conflict_count
+        FROM bookings
+        WHERE venue_id   = NEW.venue_id
+          AND event_date = NEW.event_date
+          AND status NOT IN ('Cancelled');
+    END IF;
+
+    IF conflict_count > 0 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'This venue is already booked on the selected date.';
+    END IF;
+END$$
+
+CREATE TRIGGER trg_prevent_double_booking_update
+BEFORE UPDATE ON bookings
+FOR EACH ROW
+BEGIN
+    DECLARE conflict_count INT DEFAULT 0;
+
+    IF NEW.venue_id IS NOT NULL
+       AND (NEW.venue_id != OLD.venue_id OR NEW.event_date != OLD.event_date)
+       AND NEW.status NOT IN ('Cancelled')
+    THEN
+        SELECT COUNT(*) INTO conflict_count
+        FROM bookings
+        WHERE venue_id   = NEW.venue_id
+          AND event_date = NEW.event_date
+          AND status NOT IN ('Cancelled')
+          AND booking_id != NEW.booking_id;
+    END IF;
+
+    IF conflict_count > 0 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'This venue is already booked on the selected date.';
+    END IF;
+END$$
+
+DELIMITER ;

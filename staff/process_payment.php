@@ -1,31 +1,43 @@
 <?php
 $pageTitle = 'Process Payment';
 require_once __DIR__ . '/../includes/header.php';
-requireRole(['staff', 'cashier']);
+requireRole(['admin', 'staff', 'cashier']);
 
-$db        = getDB();
-$staff     = getCurrentUser();
-$bookingId = (int)($_GET['id'] ?? 0);
+$db          = getDB();
+$staff       = getCurrentUser();
+$bookingId   = (int)($_GET['id'] ?? 0);
+$isRoleAdmin = ($_SESSION['user_role'] ?? '') === 'admin';
+$returnUrl   = $isRoleAdmin ? APP_URL . '/admin/bills.php' : APP_URL . '/staff/payments.php';
 
 if (!$bookingId) {
     setFlash('error', 'Invalid booking ID.');
-    redirect(APP_URL . '/staff/payments.php');
+    redirect($returnUrl);
 }
 
 $booking = getBookingById($bookingId);
 
 if (!$booking) {
     setFlash('error', 'Booking not found.');
-    redirect(APP_URL . '/staff/payments.php');
+    redirect($returnUrl);
 }
 
-$amountPaid  = (float)($booking['amount_paid'] ?? 0);
-$totalAmount = (float)($booking['total_amount'] ?? 0);
-$balance     = max(0.0, $totalAmount - $amountPaid);
+$amountPaid  = round((float)($booking['amount_paid'] ?? 0), 2);
+$totalAmount = round((float)($booking['total_amount'] ?? 0), 2);
+$balance     = round(max(0.0, $totalAmount - $amountPaid), 2);
+
+if (strtolower($booking['status'] ?? '') === 'pending') {
+    setFlash('warning', 'Cannot collect payment: Booking #' . getBookingRef($booking) . ' is still Pending. It must be approved by the cashier before payment can be collected.');
+    redirect($returnUrl);
+}
+
+if (strtolower($booking['status'] ?? '') === 'cancelled') {
+    setFlash('error', 'Cannot collect payment: This booking has been cancelled.');
+    redirect($returnUrl);
+}
 
 if (($booking['status'] ?? '') === 'Paid' || ($balance <= 0 && $totalAmount > 0)) {
     setFlash('info', 'This booking is already fully paid.');
-    redirect(APP_URL . '/staff/payments.php');
+    redirect($returnUrl);
 }
 
 $errors = [];
@@ -36,6 +48,18 @@ $prevStmt->execute([$bookingId]);
 $prevPayments = $prevStmt->fetchAll();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Real-time verification of booking status before collecting payment
+    $freshCheck = $db->prepare("SELECT status FROM bookings WHERE booking_id = ?");
+    $freshCheck->execute([$bookingId]);
+    $freshStatus = $freshCheck->fetchColumn();
+
+    if (strtolower($freshStatus) === 'pending') {
+        $errors[] = 'Cannot collect payment: Booking is still Pending. It must be approved by the cashier first.';
+    }
+    if (strtolower($freshStatus) === 'cancelled') {
+        $errors[] = 'Cannot collect payment: This booking has been cancelled.';
+    }
+
     $amount    = (float)($_POST['amount_paid']    ?? 0);
     $payType   = sanitize($_POST['payment_type']  ?? ($amount >= $balance ? 'full' : 'downpayment'));
 
@@ -70,11 +94,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             updateBookingPaymentStatus($bookingId);
 
+            $newPayId = (int)$db->lastInsertId();
             $db->commit();
 
             logAudit($staffId, 'PAYMENT', "Processed payment of " . formatCurrency($amount) . " for booking #{$bookingId}", 'payments');
-            setFlash('success', 'Payment of ' . formatCurrency($amount) . ' processed successfully!');
-            redirect(APP_URL . '/staff/payments.php');
+            setFlash('success', 'Payment of ' . formatCurrency($amount) . ' processed successfully! <a href="' . APP_URL . '/receipt.php?id=' . $newPayId . '" target="_blank" style="color:#fff;text-decoration:underline;margin-left:8px;font-weight:700;"><i class="fa-solid fa-receipt"></i> View Official Receipt (' . $orNumber . ')</a>');
+            redirect($returnUrl);
         } catch (Exception $e) {
             $db->rollBack();
             $errors[] = 'Payment failed. Please try again.';
@@ -90,7 +115,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <h1>Process Payment</h1>
         <p>Booking: <strong style="color:var(--accent-teal);"><?= htmlspecialchars(getBookingRef($booking)) ?></strong></p>
     </div>
-    <a href="<?= APP_URL ?>/staff/payments.php" class="btn btn-secondary">
+    <a href="<?= $returnUrl ?>" class="btn btn-secondary">
         <i class="fa-solid fa-arrow-left"></i> Back
     </a>
 </div>
@@ -99,6 +124,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="alert alert-error">
         <span class="alert-icon">✗</span>
         <div><?php foreach ($errors as $e) echo "<div>" . htmlspecialchars($e) . "</div>"; ?></div>
+    </div>
+<?php endif; ?>
+
+<?php if (!empty($booking['approved_at'])): ?>
+    <div style="background:rgba(39,174,96,0.1);border:1px solid rgba(39,174,96,0.3);color:#27ae60;padding:12px 18px;border-radius:10px;margin-bottom:20px;display:flex;align-items:center;gap:10px;font-size:0.9rem;">
+        <i class="fa-solid fa-circle-check" style="font-size:1.2rem;"></i>
+        <div>
+            Booking Approved on <strong><?= date('M d, Y g:i A', strtotime($booking['approved_at'])) ?></strong>. Ready for walk-in cash payment.
+        </div>
     </div>
 <?php endif; ?>
 
@@ -129,18 +163,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <div class="form-group">
                 <label class="form-label" for="payment_method">Payment Method <span style="color:var(--accent-red);">*</span></label>
-                <select id="payment_method" name="payment_method" class="form-control" required>
-                    <option value="cash">💵 Cash</option>
-                    <option value="gcash">📱 GCash</option>
-                    <option value="bank_transfer">🏦 Bank Transfer</option>
-                    <option value="credit_card">💳 Credit Card</option>
+                <select id="payment_method" name="payment_method" class="form-control" style="background:rgba(39,174,96,0.1);border-color:rgba(39,174,96,0.4);color:#27ae60;font-weight:700;" required>
+                    <option value="cash" selected>💵 Cash (Walk-in Only)</option>
                 </select>
+                <div class="form-hint" style="color:var(--text-muted);font-size:0.78rem;margin-top:5px;">
+                    <i class="fa-solid fa-person-walking"></i> Walk-in clients only. Payments must be collected in cash at the counter.
+                </div>
             </div>
 
             <div class="form-group">
-                <label class="form-label" for="reference_no">Reference / Transaction No. <span style="color:var(--text-muted)">(optional)</span></label>
+                <label class="form-label" for="reference_no">Cash Receipt / Counter Slip No. <span style="color:var(--text-muted)">(optional)</span></label>
                 <input type="text" id="reference_no" name="reference_no" class="form-control"
-                       placeholder="e.g. GCash ref, bank ref...">
+                       placeholder="e.g. Counter slip #, petty cash voucher...">
             </div>
 
             <div class="form-group">
@@ -187,7 +221,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <div style="font-size:0.85rem;font-weight:600;"><?= formatCurrency($py['amount_paid']) ?></div>
                         <div style="font-size:0.75rem;color:var(--text-secondary);"><?= ucwords(str_replace('_',' ', $py['payment_method'] ?? 'cash')) ?> • <?= formatDate($py['payment_date']) ?></div>
                     </div>
-                    <div style="font-size:0.75rem;color:var(--text-muted);">By <?= htmlspecialchars($py['cashier_name']) ?></div>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="font-size:0.75rem;color:var(--text-muted);">By <?= htmlspecialchars($py['cashier_name']) ?></span>
+                        <a href="<?= APP_URL ?>/receipt.php?id=<?= $py['payment_id'] ?>" target="_blank" class="btn btn-secondary btn-sm" style="font-size:0.72rem;padding:3px 8px;" title="Print Receipt">
+                            <i class="fa-solid fa-receipt"></i> Receipt
+                        </a>
+                    </div>
                 </div>
                 <?php endforeach; ?>
             </div>

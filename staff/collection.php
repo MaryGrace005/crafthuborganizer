@@ -1,7 +1,7 @@
 <?php
 $pageTitle = 'My Collections';
 require_once __DIR__ . '/../includes/header.php';
-requireRole(['staff', 'cashier']);
+requireRole(['admin', 'staff', 'cashier']);
 
 $staffMember = getCurrentUser();
 $db          = getDB();
@@ -9,31 +9,55 @@ $db          = getDB();
 $dateFrom = sanitize($_GET['from'] ?? date('Y-m-01'));
 $dateTo   = sanitize($_GET['to']   ?? date('Y-m-d'));
 
-$userId = $staffMember['user_id'] ?? $staffMember['id'];
+$userId  = $staffMember['user_id'] ?? $staffMember['id'];
+$isAdmin = ($_SESSION['user_role'] ?? '') === 'admin';
 
-$stmt = $db->prepare("
-    SELECT py.*, py.payment_id AS id, b.total_amount AS booking_total,
-           u.name AS customer_name, p.package_name AS package_name
-    FROM payments py
-    JOIN bookings b ON py.booking_id = b.booking_id
-    JOIN users u ON b.customer_id = u.user_id
-    JOIN packages p ON b.package_id = p.package_id
-    WHERE py.cashier_id = ?
-      AND DATE(py.payment_date) BETWEEN ? AND ?
-    ORDER BY py.payment_date DESC
-");
-$stmt->execute([$userId, $dateFrom, $dateTo]);
-$payments = $stmt->fetchAll();
+if ($isAdmin) {
+    $stmt = $db->prepare("
+        SELECT py.*, py.payment_id AS id, b.total_amount AS booking_total,
+               u.name AS customer_name, p.package_name AS package_name,
+               c.name AS cashier_name
+        FROM payments py
+        JOIN bookings b ON py.booking_id = b.booking_id
+        JOIN users u ON b.customer_id = u.user_id
+        JOIN packages p ON b.package_id = p.package_id
+        LEFT JOIN users c ON py.cashier_id = c.user_id
+        WHERE DATE(py.payment_date) BETWEEN ? AND ?
+        ORDER BY py.payment_date DESC
+    ");
+    $stmt->execute([$dateFrom, $dateTo]);
+    $payments = $stmt->fetchAll();
 
-// Totals
-$totalStmt = $db->prepare("SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE cashier_id = ? AND DATE(payment_date) BETWEEN ? AND ?");
-$totalStmt->execute([$userId, $dateFrom, $dateTo]);
-$totalCollected = $totalStmt->fetchColumn();
+    $totalStmt = $db->prepare("SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE DATE(payment_date) BETWEEN ? AND ?");
+    $totalStmt->execute([$dateFrom, $dateTo]);
+    $totalCollected = $totalStmt->fetchColumn();
 
-// Type breakdown
-$methodStmt = $db->prepare("SELECT payment_type AS payment_method, SUM(amount_paid) AS total, COUNT(*) AS count FROM payments WHERE cashier_id = ? AND DATE(payment_date) BETWEEN ? AND ? GROUP BY payment_type");
-$methodStmt->execute([$userId, $dateFrom, $dateTo]);
-$methodBreakdown = $methodStmt->fetchAll();
+    $methodStmt = $db->prepare("SELECT payment_type AS payment_method, SUM(amount_paid) AS total, COUNT(*) AS count FROM payments WHERE DATE(payment_date) BETWEEN ? AND ? GROUP BY payment_type");
+    $methodStmt->execute([$dateFrom, $dateTo]);
+    $methodBreakdown = $methodStmt->fetchAll();
+} else {
+    $stmt = $db->prepare("
+        SELECT py.*, py.payment_id AS id, b.total_amount AS booking_total,
+               u.name AS customer_name, p.package_name AS package_name
+        FROM payments py
+        JOIN bookings b ON py.booking_id = b.booking_id
+        JOIN users u ON b.customer_id = u.user_id
+        JOIN packages p ON b.package_id = p.package_id
+        WHERE py.cashier_id = ?
+          AND DATE(py.payment_date) BETWEEN ? AND ?
+        ORDER BY py.payment_date DESC
+    ");
+    $stmt->execute([$userId, $dateFrom, $dateTo]);
+    $payments = $stmt->fetchAll();
+
+    $totalStmt = $db->prepare("SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE cashier_id = ? AND DATE(payment_date) BETWEEN ? AND ?");
+    $totalStmt->execute([$userId, $dateFrom, $dateTo]);
+    $totalCollected = $totalStmt->fetchColumn();
+
+    $methodStmt = $db->prepare("SELECT payment_type AS payment_method, SUM(amount_paid) AS total, COUNT(*) AS count FROM payments WHERE cashier_id = ? AND DATE(payment_date) BETWEEN ? AND ? GROUP BY payment_type");
+    $methodStmt->execute([$userId, $dateFrom, $dateTo]);
+    $methodBreakdown = $methodStmt->fetchAll();
+}
 ?>
 
 <?php require_once __DIR__ . '/../includes/navbar.php'; ?>
@@ -118,6 +142,7 @@ $methodBreakdown = $methodStmt->fetchAll();
                         <th>Amount</th>
                         <th>Method</th>
                         <th>Reference No.</th>
+                        <th>Receipt</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -126,18 +151,31 @@ $methodBreakdown = $methodStmt->fetchAll();
                         <td><?= $i + 1 ?></td>
                         <td><?= formatDateTime($py['payment_date']) ?></td>
                         <td><?= htmlspecialchars($py['customer_name']) ?></td>
-                        <td><strong style="color:var(--accent-teal);"><?= htmlspecialchars(getBookingRef($py)) ?></strong></td>
+                        <td>
+                            <a href="<?= APP_URL ?>/staff/bills.php?search=<?= urlencode(getBookingRef($py)) ?>"
+                               style="color:var(--accent-teal);font-weight:700;text-decoration:none;"
+                               title="Click to view full bill details">
+                                <?= htmlspecialchars(getBookingRef($py)) ?>
+                            </a>
+                        </td>
                         <td><?= htmlspecialchars($py['package_name']) ?></td>
                         <td><strong style="color:#27ae60;"><?= formatCurrency($py['amount_paid']) ?></strong></td>
                         <td><span class="badge badge-info"><?= ucwords(str_replace('_',' ', $py['payment_method'] ?? 'cash')) ?></span></td>
                         <td><?= htmlspecialchars($py['reference_no'] ?? '—') ?></td>
+                        <td>
+                            <a href="<?= APP_URL ?>/receipt.php?id=<?= $py['id'] ?>" target="_blank"
+                               class="btn btn-secondary btn-sm" style="font-size:0.75rem;padding:4px 9px;white-space:nowrap;"
+                               title="View &amp; Print Official Electronic Receipt">
+                                <i class="fa-solid fa-receipt"></i> Receipt
+                            </a>
+                        </td>
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
                 <tfoot>
                     <tr>
                         <td colspan="5" style="text-align:right;font-weight:700;color:var(--text-secondary);padding:14px 16px;">TOTAL</td>
-                        <td colspan="3" style="font-weight:800;color:var(--accent-gold);font-size:1.1rem;padding:14px 16px;"><?= formatCurrency($totalCollected) ?></td>
+                        <td colspan="4" style="font-weight:800;color:var(--accent-gold);font-size:1.1rem;padding:14px 16px;"><?= formatCurrency($totalCollected) ?></td>
                     </tr>
                 </tfoot>
             </table>

@@ -210,12 +210,34 @@ function getBookingById(int $id): ?array {
 }
 
 // -----------------------------------------------
+//  Ensure Approval Columns on Bookings Table
+// -----------------------------------------------
+function ensureApprovalColumns(?PDO $db = null): void {
+    static $ensured = false;
+    if ($ensured) return;
+    $db = $db ?? getDB();
+    try {
+        $chk = $db->query("SHOW COLUMNS FROM bookings LIKE 'approved_at'")->fetch();
+        if (!$chk) {
+            $db->exec("ALTER TABLE bookings ADD COLUMN approved_at TIMESTAMP NULL DEFAULT NULL AFTER status");
+        }
+    } catch (Exception $e) {}
+    try {
+        $chk2 = $db->query("SHOW COLUMNS FROM bookings LIKE 'approved_by'")->fetch();
+        if (!$chk2) {
+            $db->exec("ALTER TABLE bookings ADD COLUMN approved_by INT NULL AFTER approved_at");
+        }
+    } catch (Exception $e) {}
+    $ensured = true;
+}
+
+// -----------------------------------------------
 //  Update Booking Payment Status
 // -----------------------------------------------
 function updateBookingPaymentStatus(int $bookingId): void {
     $db   = getDB();
     $stmt = $db->prepare("
-        SELECT total_amount,
+        SELECT status, total_amount,
                (SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE booking_id = b.booking_id) AS amount_paid
         FROM bookings b WHERE b.booking_id = ?
     ");
@@ -223,19 +245,24 @@ function updateBookingPaymentStatus(int $bookingId): void {
     $booking = $stmt->fetch();
     if (!$booking) return;
 
-    $total = (float)$booking['total_amount'];
-    $paid  = (float)$booking['amount_paid'];
-
-    if ($paid <= 0) {
-        $status = 'Pending';
-    } elseif ($paid >= $total) {
-        $status = 'Paid';
-    } else {
-        $status = 'Confirmed';
+    if ($booking['status'] === 'Cancelled' || $booking['status'] === 'Completed') {
+        return;
     }
 
-    $update = $db->prepare("UPDATE bookings SET status = ? WHERE booking_id = ?");
-    $update->execute([$status, $bookingId]);
+    $total = round((float)$booking['total_amount'], 2);
+    $paid  = round((float)$booking['amount_paid'], 2);
+
+    if ($paid >= ($total - 0.005) && $total > 0) {
+        $status = 'Paid';
+    } elseif ($paid > 0.005) {
+        $status = 'Confirmed';
+    } else {
+        // If 0 paid, keep Confirmed if already approved by cashier/staff, otherwise keep Pending
+        $status = ($booking['status'] === 'Confirmed') ? 'Confirmed' : 'Pending';
+    }
+
+    $update = $db->prepare("UPDATE bookings SET status = ?, amount_paid = ? WHERE booking_id = ?");
+    $update->execute([$status, $paid, $bookingId]);
 }
 
 // -----------------------------------------------
@@ -274,3 +301,178 @@ function getDashboardStats(string $role, int $userId = 0): array {
 
     return $stats;
 }
+
+// -----------------------------------------------
+//  Venue + Date Availability Check
+// -----------------------------------------------
+/**
+ * Check whether a venue is available on a given date.
+ *
+ * Only bookings with status Pending, Confirmed, or Paid
+ * are counted as "blocking" the slot. Cancelled bookings
+ * free the slot back up.
+ *
+ * @param int         $venueId          Venue to check
+ * @param string      $date             Date string (Y-m-d)
+ * @param int|null    $excludeBookingId Optional — exclude this booking (for edits)
+ * @return bool  TRUE = slot is free, FALSE = already booked
+ */
+function isVenueDateAvailable(int $venueId, string $date, ?int $excludeBookingId = null): bool {
+    $db     = getDB();
+    $sql    = "SELECT COUNT(*) FROM bookings
+               WHERE venue_id   = ?
+                 AND event_date = ?
+                 AND status NOT IN ('Cancelled')";
+    $params = [$venueId, $date];
+
+    if ($excludeBookingId !== null) {
+        $sql     .= " AND booking_id != ?";
+        $params[] = $excludeBookingId;
+    }
+
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    return (int)$stmt->fetchColumn() === 0;
+}
+
+/**
+ * Get all booked dates for a venue within a date range.
+ * Returns an array of 'Y-m-d' strings.
+ *
+ * @param int    $venueId
+ * @param string $fromDate  Y-m-d  (default: today)
+ * @param string $toDate    Y-m-d  (default: +12 months)
+ * @return string[]
+ */
+function getVenueBookedDates(int $venueId, string $fromDate = '', string $toDate = ''): array {
+    if (!$fromDate) $fromDate = date('Y-m-d');
+    if (!$toDate)   $toDate   = date('Y-m-d', strtotime('+12 months'));
+
+    $db   = getDB();
+    $stmt = $db->prepare("
+        SELECT event_date
+        FROM bookings
+        WHERE venue_id   = ?
+          AND event_date BETWEEN ? AND ?
+          AND status NOT IN ('Cancelled')
+        ORDER BY event_date ASC
+    ");
+    $stmt->execute([$venueId, $fromDate, $toDate]);
+    return array_column($stmt->fetchAll(), 'event_date');
+}
+
+// -----------------------------------------------
+//  Payment Due Date & Ongoing Payment Helpers
+// -----------------------------------------------
+
+/**
+ * Compute or retrieve the payment due date for a booking.
+ * Defaults to 7 days before event date (or 3 days after creation / 1 day before event if event is soon).
+ */
+function getBookingPaymentDueDate(array $booking): string {
+    if (!empty($booking['payment_due_date'])) {
+        return $booking['payment_due_date'];
+    }
+    if (!empty($booking['event_date'])) {
+        $eventTs   = strtotime($booking['event_date']);
+        $createdTs = !empty($booking['created_at']) ? strtotime($booking['created_at']) : time();
+        $dueTs     = strtotime('-7 days', $eventTs);
+        if ($dueTs <= $createdTs) {
+            $altTs = strtotime('+3 days', $createdTs);
+            $dueTs = min($altTs, strtotime('-1 day', $eventTs));
+            if ($dueTs < $createdTs) {
+                $dueTs = $eventTs;
+            }
+        }
+        return date('Y-m-d', $dueTs);
+    }
+    return date('Y-m-d', strtotime('+7 days'));
+}
+
+/**
+ * Fetch all active bookings for a customer that have an unpaid balance (ongoing payments).
+ * Computes remaining balance, due date, days until due, and urgency status.
+ *
+ * @param int $customerId
+ * @return array
+ */
+function getCustomerOngoingBookings(int $customerId): array {
+    $db = getDB();
+    $stmt = $db->prepare("
+        SELECT b.*, b.booking_id AS id, p.package_name, v.venue_name,
+               (SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE booking_id = b.booking_id) AS total_paid
+        FROM bookings b
+        JOIN packages p ON b.package_id = p.package_id
+        LEFT JOIN venues v ON b.venue_id = v.venue_id
+        WHERE b.customer_id = ?
+          AND b.status NOT IN ('Cancelled')
+        ORDER BY b.event_date ASC
+    ");
+    $stmt->execute([$customerId]);
+    $rows = $stmt->fetchAll();
+
+    $ongoing = [];
+    $today = date('Y-m-d');
+    $todayTs = strtotime($today);
+
+    foreach ($rows as $b) {
+        $total   = round((float)$b['total_amount'], 2);
+        $paid    = round((float)$b['total_paid'], 2);
+        $balance = round(max(0.0, $total - $paid), 2);
+
+        // Only consider bookings with an unpaid balance (strictly greater than 0)
+        if ($balance > 0.005) {
+            $dueDate   = getBookingPaymentDueDate($b);
+            $dueTs     = strtotime($dueDate);
+            $daysLeft  = (int)round(($dueTs - $todayTs) / 86400);
+
+            if ($daysLeft < 0) {
+                $urgency = 'overdue';
+                $urgencyLabel = 'Overdue by ' . abs($daysLeft) . ' day' . (abs($daysLeft) !== 1 ? 's' : '');
+            } elseif ($daysLeft === 0) {
+                $urgency = 'due_today';
+                $urgencyLabel = 'Due Today';
+            } elseif ($daysLeft <= 7) {
+                $urgency = 'due_soon';
+                $urgencyLabel = 'Due in ' . $daysLeft . ' day' . ($daysLeft !== 1 ? 's' : '');
+            } else {
+                $urgency = 'upcoming';
+                $urgencyLabel = 'Due in ' . $daysLeft . ' days';
+            }
+
+            $b['calculated_balance'] = $balance;
+            $b['effective_due_date'] = $dueDate;
+            $b['days_left']          = $daysLeft;
+            $b['urgency']            = $urgency;
+            $b['urgency_label']      = $urgencyLabel;
+
+            $ongoing[] = $b;
+        }
+    }
+
+    return $ongoing;
+}
+
+/**
+ * Check whether a customer has any ongoing (unpaid) booking.
+ */
+function hasCustomerOngoingPayment(int $customerId): bool {
+    return count(getCustomerOngoingBookings($customerId)) > 0;
+}
+
+/**
+ * Retrieve notifications for bookings with payment due soon (<= $daysThreshold days), due today, or overdue.
+ */
+function getCustomerPaymentDueAlerts(int $customerId, int $daysThreshold = 7): array {
+    $ongoing = getCustomerOngoingBookings($customerId);
+    $alerts  = [];
+
+    foreach ($ongoing as $b) {
+        if ($b['days_left'] <= $daysThreshold) {
+            $alerts[] = $b;
+        }
+    }
+
+    return $alerts;
+}
+

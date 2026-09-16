@@ -6,22 +6,95 @@ $pageTitle = 'Bills & Accounts Receivable';
 require_once __DIR__ . '/../includes/header.php';
 requireRole(['staff', 'cashier']);
 $db = getDB();
+ensureApprovalColumns($db);
 
-// ── Quick-pay action ────────────────────────────────────────
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'mark_paid') {
-    $bookingId = (int)($_POST['booking_id'] ?? 0);
-    $amount    = (float)($_POST['amount'] ?? 0);
-    $method    = sanitize($_POST['payment_method'] ?? 'cash');
-    $cashierId = $_SESSION['user_id'];
+// ── POST actions (Approve & Quick-pay) ──────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? '';
 
-    if ($bookingId > 0 && $amount > 0) {
-        $db->prepare("INSERT INTO payments (booking_id, cashier_id, amount_paid, payment_method, payment_date, notes)
-                      VALUES (?, ?, ?, ?, NOW(), 'Quick pay from Staff Bills page')")
-           ->execute([$bookingId, $cashierId, $amount, $method]);
-        logAudit($cashierId, 'PAYMENT', "Recorded payment of ₱{$amount} for booking #{$bookingId}", 'payments');
-        setFlash('success', 'Payment of ' . formatCurrency($amount) . ' recorded successfully.');
+    // Quick-approve pending booking directly from Bills (Approve only)
+    if ($action === 'approve_booking') {
+        $bookingId = (int)($_POST['booking_id'] ?? 0);
+        $cashierId = $_SESSION['user_id'] ?? 0;
+        $chk = $db->prepare("SELECT b.*, u.name AS customer_name FROM bookings b JOIN users u ON b.customer_id = u.user_id WHERE b.booking_id = ?");
+        $chk->execute([$bookingId]);
+        $bk = $chk->fetch();
+
+        if ($bk) {
+            $ref = getBookingRef($bk);
+            ensureApprovalColumns($db);
+            $now = date('Y-m-d H:i:s');
+
+            $db->prepare("UPDATE bookings SET status = 'Confirmed', approved_at = ?, approved_by = ? WHERE booking_id = ?")
+               ->execute([$now, $cashierId, $bookingId]);
+            updateBookingPaymentStatus($bookingId);
+
+            $timeFormatted = date('M d, Y g:i A', strtotime($now));
+            logAudit($cashierId, 'APPROVE_BOOKING', "Cashier approved booking #{$bookingId} ({$ref}) on {$timeFormatted} from Bills", 'bookings');
+            setFlash('success', "✓ Booking <strong>{$ref}</strong> approved on <strong>{$timeFormatted}</strong>! Payment can now be collected.");
+
+            $qs = !empty($_GET['search']) ? '?search=' . urlencode($_GET['search']) : '';
+            redirect(APP_URL . '/staff/bills.php' . $qs);
+        } else {
+            setFlash('error', 'Booking not found.');
+            $qs = !empty($_GET['search']) ? '?search=' . urlencode($_GET['search']) : '';
+            redirect(APP_URL . '/staff/bills.php' . $qs);
+        }
     }
-    redirect(APP_URL . '/staff/bills.php');
+
+    if ($action === 'mark_paid') {
+        $bookingId = (int)($_POST['booking_id'] ?? 0);
+        $amount    = round((float)($_POST['amount'] ?? 0), 2);
+        $method    = sanitize($_POST['payment_method'] ?? 'cash');
+        $cashierId = $_SESSION['user_id'];
+
+        if ($bookingId > 0 && $amount > 0) {
+            // Real-time check: Cashier cannot collect payment if booking is Pending or Cancelled
+            $chkStmt = $db->prepare("SELECT status, total_amount, (SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE booking_id = bookings.booking_id) AS paid_so_far FROM bookings WHERE booking_id = ?");
+            $chkStmt->execute([$bookingId]);
+            $currBooking = $chkStmt->fetch();
+
+            if (!$currBooking) {
+                setFlash('error', 'Booking not found.');
+                redirect(APP_URL . '/staff/bills.php');
+            }
+
+            if (strtolower($currBooking['status']) === 'pending') {
+                setFlash('error', 'Cannot collect payment: Booking is still Pending. Please click Approve first to confirm the booking.');
+                redirect(APP_URL . '/staff/bills.php');
+            }
+
+            if (strtolower($currBooking['status']) === 'cancelled') {
+                setFlash('error', 'Cannot collect payment: This booking has been cancelled.');
+                redirect(APP_URL . '/staff/bills.php');
+            }
+
+            $remainingBalance = round(max(0.0, (float)$currBooking['total_amount'] - (float)$currBooking['paid_so_far']), 2);
+            if ($remainingBalance <= 0.005) {
+                setFlash('info', 'This booking is already fully paid.');
+                redirect(APP_URL . '/staff/bills.php');
+            }
+            if ($amount > $remainingBalance) {
+                $amount = $remainingBalance;
+            }
+
+            $orNumber = 'OR-' . date('Y') . '-' . str_pad(rand(1, 99999), 5, '0', STR_PAD_LEFT);
+            $ins = $db->prepare("INSERT INTO payments (booking_id, cashier_id, amount_paid, payment_method, or_number, payment_date, notes)
+                          VALUES (?, ?, ?, ?, ?, NOW(), 'Quick pay from Cashier Bills page')");
+            $ins->execute([$bookingId, $cashierId, $amount, $method, $orNumber]);
+            $newPayId = (int)$db->lastInsertId();
+
+            try {
+                $upd = $db->prepare("UPDATE bookings SET amount_paid = COALESCE(amount_paid, 0) + ? WHERE booking_id = ?");
+                $upd->execute([$amount, $bookingId]);
+            } catch (PDOException $e) {}
+            updateBookingPaymentStatus($bookingId);
+
+            logAudit($cashierId, 'PAYMENT', "Recorded payment of ₱{$amount} for booking #{$bookingId}", 'payments');
+            setFlash('success', 'Payment of ' . formatCurrency($amount) . ' recorded successfully! <a href="' . APP_URL . '/receipt.php?id=' . $newPayId . '" target="_blank" style="color:#fff;text-decoration:underline;margin-left:8px;font-weight:700;"><i class="fa-solid fa-receipt"></i> View Receipt (' . $orNumber . ')</a>');
+        } // end if bookingId > 0 && amount > 0
+        redirect(APP_URL . '/staff/bills.php');
+    } // end if action === 'mark_paid'
 }
 
 // ── Filters ────────────────────────────────────────────────
@@ -35,13 +108,16 @@ $sql = "
         b.booking_reference,
         b.total_amount,
         b.event_date,
+        b.payment_due_date,
         b.status AS booking_status,
+        b.approved_at,
         b.created_at,
         u.name   AS customer_name,
         u.email  AS customer_email,
         u.contact_no,
         p.package_name,
-        COALESCE(SUM(pay.amount_paid), 0) AS total_paid
+        COALESCE(SUM(pay.amount_paid), 0) AS total_paid,
+        MAX(pay.payment_id) AS latest_payment_id
     FROM bookings b
     JOIN users    u ON b.customer_id = u.user_id
     JOIN packages p ON b.package_id  = p.package_id
@@ -74,9 +150,9 @@ $bills = $stmt->fetchAll();
 $totalOutstanding = 0;
 $totalCollected   = 0;
 foreach ($bills as $bill) {
-    $balance = $bill['total_amount'] - $bill['total_paid'];
-    $totalOutstanding += max(0, $balance);
-    $totalCollected   += $bill['total_paid'];
+    $balance = round(max(0.0, (float)$bill['total_amount'] - (float)$bill['total_paid']), 2);
+    $totalOutstanding += $balance;
+    $totalCollected   += (float)$bill['total_paid'];
 }
 ?>
 <?php require_once __DIR__ . '/../includes/navbar.php'; ?>
@@ -140,6 +216,7 @@ foreach ($bills as $bill) {
                     <th>Customer</th>
                     <th>Package</th>
                     <th>Event Date</th>
+                    <th>Payment Due</th>
                     <th>Total Amount</th>
                     <th>Paid</th>
                     <th>Balance</th>
@@ -149,16 +226,19 @@ foreach ($bills as $bill) {
             </thead>
             <tbody>
                 <?php if (empty($bills)): ?>
-                <tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted);">
+                <tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-muted);">
                     <i class="fa-solid fa-check-circle" style="font-size:2rem;color:#27ae60;margin-bottom:8px;display:block;"></i>
                     No records found.
                 </td></tr>
                 <?php endif; ?>
                 <?php foreach ($bills as $b):
-                    $balance    = $b['total_amount'] - $b['total_paid'];
-                    $isPaid     = $balance <= 0;
-                    $pct        = $b['total_amount'] > 0 ? min(100, round($b['total_paid'] / $b['total_amount'] * 100)) : 100;
+                    $balance    = round(max(0.0, (float)$b['total_amount'] - (float)$b['total_paid']), 2);
+                    $isPaid     = $balance <= 0.005;
+                    $pct        = (float)$b['total_amount'] > 0 ? min(100, round((float)$b['total_paid'] / (float)$b['total_amount'] * 100)) : 100;
                     $balColor   = $isPaid ? '#27ae60' : ($pct >= 50 ? '#f5a623' : '#e94560');
+                    $dueDate    = getBookingPaymentDueDate($b);
+                    $dueTs      = strtotime($dueDate);
+                    $daysLeft   = (int)round(($dueTs - strtotime(date('Y-m-d'))) / 86400);
                 ?>
                 <tr class="bill-row" data-name="<?= strtolower(htmlspecialchars($b['customer_name'])) ?>">
                     <td>
@@ -173,6 +253,23 @@ foreach ($bills as $bill) {
                     <td style="font-size:0.88rem;"><?= htmlspecialchars($b['package_name']) ?></td>
                     <td style="font-size:0.85rem;color:var(--text-secondary);">
                         <?= $b['event_date'] ? date('M d, Y', strtotime($b['event_date'])) : '—' ?>
+                    </td>
+                    <td>
+                        <?php if ($isPaid): ?>
+                            <span class="badge badge-success" style="font-size:0.72rem;"><i class="fa-solid fa-check"></i> Paid</span>
+                        <?php elseif ($daysLeft < 0): ?>
+                            <div><strong style="color:#e94560;font-size:0.85rem;"><?= date('M d, Y', $dueTs) ?></strong></div>
+                            <span class="badge badge-danger" style="font-size:0.72rem;padding:2px 6px;">Overdue (<?= abs($daysLeft) ?>d)</span>
+                        <?php elseif ($daysLeft === 0): ?>
+                            <div><strong style="color:#f5a623;font-size:0.85rem;"><?= date('M d, Y', $dueTs) ?></strong></div>
+                            <span class="badge badge-warning" style="font-size:0.72rem;padding:2px 6px;">Due Today</span>
+                        <?php elseif ($daysLeft <= 7): ?>
+                            <div><strong style="color:#f5a623;font-size:0.85rem;"><?= date('M d, Y', $dueTs) ?></strong></div>
+                            <span class="badge badge-warning" style="font-size:0.72rem;padding:2px 6px;"><?= $daysLeft ?> days left</span>
+                        <?php else: ?>
+                            <div style="font-size:0.85rem;color:var(--text-secondary);"><?= date('M d, Y', $dueTs) ?></div>
+                            <span style="font-size:0.72rem;color:var(--text-muted);"><?= $daysLeft ?> days left</span>
+                        <?php endif; ?>
                     </td>
                     <td style="font-weight:700;"><?= formatCurrency($b['total_amount']) ?></td>
                     <td style="color:#27ae60;font-weight:700;"><?= formatCurrency($b['total_paid']) ?></td>
@@ -194,16 +291,46 @@ foreach ($bills as $bill) {
                         <span style="background:<?= $bc ?>20;color:<?= $bc ?>;border:1px solid <?= $bc ?>40;padding:3px 10px;border-radius:20px;font-size:0.78rem;font-weight:700;">
                             <?= htmlspecialchars($b['booking_status']) ?>
                         </span>
+                        <?php if (!empty($b['approved_at'])): ?>
+                            <div style="font-size:0.72rem;color:var(--text-muted);margin-top:5px;display:flex;align-items:center;gap:4px;" title="Approved on <?= date('M d, Y g:i A', strtotime($b['approved_at'])) ?>">
+                                <i class="fa-solid fa-circle-check" style="color:#27ae60;font-size:0.75rem;"></i>
+                                <span>Approved: <strong style="color:var(--text-secondary);"><?= date('M d, Y g:i A', strtotime($b['approved_at'])) ?></strong></span>
+                            </div>
+                        <?php endif; ?>
                     </td>
                     <td>
-                        <?php if (!$isPaid && $b['booking_status'] !== 'Cancelled'): ?>
-                        <button class="btn btn-success btn-sm"
-                                onclick="openPayModal(<?= $b['booking_id'] ?>, '<?= htmlspecialchars(addslashes($b['customer_name'])) ?>', <?= abs($balance) ?>)">
-                            <i class="fa-solid fa-peso-sign"></i> Collect Payment
-                        </button>
-                        <?php else: ?>
-                        <span class="badge badge-success"><i class="fa-solid fa-check"></i> Fully Paid</span>
-                        <?php endif; ?>
+                        <div style="display:flex;gap:6px;align-items:center;flex-wrap:nowrap;">
+                            <?php if ($b['booking_status'] === 'Pending'): ?>
+                                <form method="POST" style="display:inline;margin:0;">
+                                    <input type="hidden" name="action" value="approve_booking">
+                                    <input type="hidden" name="booking_id" value="<?= $b['booking_id'] ?>">
+                                    <button type="submit" class="btn btn-warning btn-sm" style="white-space:nowrap;font-weight:700;padding:5px 10px;"
+                                            onclick="return confirm('Approve booking <?= htmlspecialchars(addslashes(getBookingRef($b))) ?> for <?= htmlspecialchars(addslashes($b['customer_name'])) ?>?')"
+                                            title="Approve booking to enable payment collection">
+                                        <i class="fa-solid fa-check"></i> Approve
+                                    </button>
+                                </form>
+                            <?php elseif (!$isPaid && $b['booking_status'] !== 'Cancelled'): ?>
+                                <button type="button" class="btn btn-success btn-sm"
+                                        onclick="openPayModal(<?= $b['booking_id'] ?>, '<?= htmlspecialchars(addslashes($b['customer_name'])) ?>', <?= abs($balance) ?>, '<?= !empty($b['approved_at']) ? 'Approved on ' . date('M d, Y g:i A', strtotime($b['approved_at'])) : '' ?>')"
+                                        title="Collect payment now">
+                                    <i class="fa-solid fa-peso-sign"></i> Collect
+                                </button>
+                                <a href="<?= APP_URL ?>/staff/process_payment.php?id=<?= $b['booking_id'] ?>"
+                                   class="btn btn-primary btn-sm" title="Detailed Payment & Receipts">
+                                    <i class="fa-solid fa-file-invoice"></i>
+                                </a>
+                            <?php endif; ?>
+                            <?php if (!empty($b['latest_payment_id'])): ?>
+                                <a href="<?= APP_URL ?>/receipt.php?id=<?= $b['latest_payment_id'] ?>" target="_blank"
+                                   class="btn btn-secondary btn-sm" title="View Official Receipt" style="white-space:nowrap;">
+                                    <i class="fa-solid fa-receipt"></i> Receipt
+                                </a>
+                            <?php endif; ?>
+                            <?php if ($isPaid && empty($b['latest_payment_id'])): ?>
+                                <span class="badge badge-success"><i class="fa-solid fa-check"></i> Fully Paid</span>
+                            <?php endif; ?>
+                        </div>
                     </td>
                 </tr>
                 <?php endforeach; ?>
@@ -223,22 +350,26 @@ foreach ($bills as $bill) {
             <input type="hidden" name="action" value="mark_paid">
             <input type="hidden" name="booking_id" id="payBookingId">
             <div class="modal-body">
+                <div id="payApprovedNotice" style="display:none;background:rgba(39,174,96,0.12);border:1px solid rgba(39,174,96,0.35);color:#27ae60;padding:8px 12px;border-radius:8px;font-size:0.82rem;font-weight:600;margin-bottom:14px;align-items:center;gap:8px;">
+                    <i class="fa-solid fa-circle-check"></i>
+                    <span id="payApprovedText"></span>
+                </div>
                 <p style="margin-bottom:16px;color:var(--text-secondary);font-size:0.9rem;">
                     Recording payment for: <strong id="payCustomerName" style="color:#fff;"></strong>
                 </p>
                 <div class="form-group">
                     <label class="form-label">Amount to Pay (₱) <span style="color:var(--accent-red);">*</span></label>
-                    <input type="number" name="amount" id="payAmount" class="form-control" step="0.01" min="1" required>
+                    <input type="number" name="amount" id="payAmount" class="form-control" step="any" min="0.01" required>
                     <div class="form-hint" id="payBalanceHint"></div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Payment Method</label>
-                    <select name="payment_method" class="form-control">
-                        <option value="cash">Cash</option>
-                        <option value="gcash">GCash</option>
-                        <option value="bank_transfer">Bank Transfer</option>
-                        <option value="check">Check</option>
+                    <select name="payment_method" class="form-control" style="background:rgba(39,174,96,0.1);border-color:rgba(39,174,96,0.4);color:#27ae60;font-weight:700;">
+                        <option value="cash" selected>💵 Cash (Walk-in Only)</option>
                     </select>
+                    <div class="form-hint" style="color:var(--text-muted);font-size:0.78rem;margin-top:5px;">
+                        <i class="fa-solid fa-person-walking"></i> Walk-in cash transactions only. Payments must be received in cash at the counter.
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -250,13 +381,43 @@ foreach ($bills as $bill) {
 </div>
 
 <script>
-function openPayModal(bookingId, customerName, balance) {
+function openPayModal(bookingId, customerName, balance, approvedText = '') {
+    const balVal = parseFloat(balance);
     document.getElementById('payBookingId').value   = bookingId;
     document.getElementById('payCustomerName').textContent = customerName;
-    document.getElementById('payAmount').value      = parseFloat(balance).toFixed(2);
-    document.getElementById('payBalanceHint').textContent  = 'Outstanding balance: ₱' + parseFloat(balance).toLocaleString('en-PH', {minimumFractionDigits:2});
-    document.getElementById('quickPayModal').classList.add('active');
+    document.getElementById('payAmount').value      = balVal.toFixed(2);
+    document.getElementById('payAmount').max        = balVal.toFixed(2);
+    document.getElementById('payBalanceHint').textContent  = 'Outstanding balance: ₱' + balVal.toLocaleString('en-PH', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+    const notice = document.getElementById('payApprovedNotice');
+    const noticeTxt = document.getElementById('payApprovedText');
+    if (notice && noticeTxt) {
+        if (approvedText) {
+            noticeTxt.textContent = approvedText;
+            notice.style.display = 'flex';
+        } else {
+            notice.style.display = 'none';
+        }
+    }
+
+    const m = document.getElementById('quickPayModal');
+    m.classList.add('open');
+    document.body.style.overflow = 'hidden';
 }
+
+function closeQuickPayModal() {
+    const m = document.getElementById('quickPayModal');
+    m.classList.remove('open');
+    document.body.style.overflow = '';
+}
+
+document.querySelectorAll('#quickPayModal [data-modal-close], #quickPayModal .modal-close').forEach(btn => {
+    btn.addEventListener('click', closeQuickPayModal);
+});
+
+document.getElementById('quickPayModal').addEventListener('click', function(e) {
+    if (e.target === this) closeQuickPayModal();
+});
 
 document.getElementById('billsSearchInput').addEventListener('input', function() {
     const q = this.value.toLowerCase();
@@ -265,6 +426,33 @@ document.getElementById('billsSearchInput').addEventListener('input', function()
         const text = row.textContent.toLowerCase();
         row.style.display = (name.includes(q) || text.includes(q)) ? '' : 'none';
     });
+});
+
+window.addEventListener('DOMContentLoaded', function() {
+    <?php 
+    if (!empty($_GET['pay_booking_id'])) {
+        $autoPayId = (int)$_GET['pay_booking_id'];
+        $autoBk = null;
+        foreach ($bills as $billItem) {
+            if ((int)$billItem['booking_id'] === $autoPayId) {
+                $autoBk = $billItem;
+                break;
+            }
+        }
+        if (!$autoBk) {
+            $autoStmt = $db->prepare("SELECT b.booking_id, b.total_amount, b.approved_at, u.name AS customer_name,
+                (SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE booking_id = b.booking_id) AS total_paid
+                FROM bookings b JOIN users u ON b.customer_id = u.user_id WHERE b.booking_id = ?");
+            $autoStmt->execute([$autoPayId]);
+            $autoBk = $autoStmt->fetch();
+        }
+        if ($autoBk) {
+            $autoBal = round(max(0.0, (float)$autoBk['total_amount'] - (float)$autoBk['total_paid']), 2);
+            $apprNotice = !empty($autoBk['approved_at']) ? 'Approved on ' . date('M d, Y g:i A', strtotime($autoBk['approved_at'])) : '';
+            echo "openPayModal(" . $autoPayId . ", " . json_encode($autoBk['customer_name']) . ", " . $autoBal . ", " . json_encode($apprNotice) . ");\n";
+        }
+    }
+    ?>
 });
 </script>
 

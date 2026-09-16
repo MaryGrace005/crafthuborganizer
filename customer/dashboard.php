@@ -5,8 +5,13 @@ requireRole(['customer']);
 requireApproved();
 
 $user  = getCurrentUser();
+$userId = $user['user_id'] ?? $user['id'];
 $stats = getDashboardStats('customer', $user['id']);
 $db    = getDB();
+
+$ongoingBookings = getCustomerOngoingBookings($userId);
+$hasOngoingPayment = !empty($ongoingBookings);
+$totalOngoingBalance = array_sum(array_column($ongoingBookings, 'calculated_balance'));
 
 // Recent bookings
 $stmt = $db->prepare("
@@ -50,9 +55,15 @@ $recentReceipts = $payStmt->fetchAll();
         </div>
         <?php endif; ?>
     </div>
+    <?php if ($hasOngoingPayment): ?>
+    <a href="<?= APP_URL ?>/customer/packages.php" class="btn btn-secondary" style="border:1.5px solid #e94560;color:#e94560;font-weight:700;" title="You have an ongoing payment. All previous bookings must be fully paid before booking another package.">
+        <i class="fa-solid fa-lock"></i> Book a Package (Locked)
+    </a>
+    <?php else: ?>
     <a href="<?= APP_URL ?>/customer/packages.php" class="btn btn-primary">
         <i class="fa-solid fa-plus"></i> Book a Package
     </a>
+    <?php endif; ?>
 </div>
 
 <!-- Stats -->
@@ -122,6 +133,7 @@ $recentReceipts = $payStmt->fetchAll();
                         <th>Total Amount</th>
                         <th>Paid</th>
                         <th>Balance</th>
+                        <th>Payment Due</th>
                         <th>Payment Status</th>
                     </tr>
                 </thead>
@@ -131,6 +143,9 @@ $recentReceipts = $payStmt->fetchAll();
                         $paid      = (float)($b['calc_paid'] > 0 ? $b['calc_paid'] : ($b['amount_paid'] ?? 0));
                         $balance   = max(0.0, $total - $paid);
                         $payStatus = ($paid >= $total && $total > 0) ? 'paid' : ($paid > 0 ? 'partial' : 'unpaid');
+                        $dueDate   = getBookingPaymentDueDate($b);
+                        $dueTs     = strtotime($dueDate);
+                        $daysLeft  = (int)round(($dueTs - strtotime(date('Y-m-d'))) / 86400);
                     ?>
                     <tr>
                         <td><strong style="color:var(--accent-teal);"><?= htmlspecialchars(getBookingRef($b)) ?></strong></td>
@@ -146,6 +161,23 @@ $recentReceipts = $payStmt->fetchAll();
                                 <strong style="color:var(--accent-red);"><?= formatCurrency($balance) ?></strong>
                             <?php else: ?>
                                 <span class="badge badge-success"><i class="fa-solid fa-check"></i> Paid</span>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <?php if ($balance <= 0): ?>
+                                <span class="badge badge-success" style="font-size:0.75rem;"><i class="fa-solid fa-check"></i> Fully Settled</span>
+                            <?php elseif ($daysLeft < 0): ?>
+                                <div><strong style="color:#e94560;font-size:0.88rem;"><?= date('M d, Y', $dueTs) ?></strong></div>
+                                <span class="badge badge-danger" style="font-size:0.72rem;padding:2px 6px;">Overdue (<?= abs($daysLeft) ?>d)</span>
+                            <?php elseif ($daysLeft === 0): ?>
+                                <div><strong style="color:#f5a623;font-size:0.88rem;"><?= date('M d, Y', $dueTs) ?></strong></div>
+                                <span class="badge badge-warning" style="font-size:0.72rem;padding:2px 6px;">Due Today</span>
+                            <?php elseif ($daysLeft <= 7): ?>
+                                <div><strong style="color:#f5a623;font-size:0.88rem;"><?= date('M d, Y', $dueTs) ?></strong></div>
+                                <span class="badge badge-warning" style="font-size:0.72rem;padding:2px 6px;"><?= $daysLeft ?> days left</span>
+                            <?php else: ?>
+                                <div style="font-size:0.85rem;color:var(--text-primary);"><?= date('M d, Y', $dueTs) ?></div>
+                                <span style="font-size:0.72rem;color:var(--text-muted);"><?= $daysLeft ?> days left</span>
                             <?php endif; ?>
                         </td>
                         <td><?= statusBadge($payStatus) ?></td>

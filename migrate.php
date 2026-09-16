@@ -240,6 +240,26 @@ try {
     $results[] = ['label' => 'bookings.venue_id nullable', 'ok' => false, 'msg' => $e->getMessage()];
 }
 
+// ── 8c. payment_due_date column on bookings ──────────────────────────────
+if (columnExists($db, 'bookings', 'payment_due_date')) {
+    $results[] = ['label' => 'bookings.payment_due_date', 'ok' => true, 'msg' => 'Already exists.'];
+} else {
+    try {
+        $db->exec("ALTER TABLE bookings ADD COLUMN payment_due_date DATE NULL AFTER event_date");
+        $results[] = ['label' => 'bookings.payment_due_date', 'ok' => true, 'msg' => 'Column added.'];
+    } catch (PDOException $e) {
+        $results[] = ['label' => 'bookings.payment_due_date', 'ok' => false, 'msg' => $e->getMessage()];
+    }
+}
+
+// Backfill payment_due_date for bookings where it is NULL (default: 7 days before event_date)
+try {
+    $backfilledDue = $db->exec("UPDATE bookings SET payment_due_date = DATE_SUB(event_date, INTERVAL 7 DAY) WHERE payment_due_date IS NULL AND event_date IS NOT NULL");
+    $results[] = ['label' => 'Backfill bookings.payment_due_date', 'ok' => true, 'msg' => "Updated {$backfilledDue} booking(s) with calculated payment due date."];
+} catch (PDOException $e) {
+    $results[] = ['label' => 'Backfill bookings.payment_due_date', 'ok' => false, 'msg' => $e->getMessage()];
+}
+
 // ── 9. account_id_seq table (race-condition-safe unique ID counter) ────────
 if (tableExists($db, 'account_id_seq')) {
     $results[] = ['label' => 'account_id_seq table', 'ok' => true, 'msg' => 'Already exists.'];
@@ -395,6 +415,29 @@ try {
     $results[] = ['label' => 'Additional event packages & services', 'ok' => true, 'msg' => "Added {$addedPkgs} new package(s) and {$addedComps} service component(s)."];
 } catch (PDOException $e) {
     $results[] = ['label' => 'Additional event packages & services', 'ok' => false, 'msg' => $e->getMessage()];
+}
+
+// ── 16. approved_at and approved_by on bookings ────────────────────────────
+if (columnExists($db, 'bookings', 'approved_at')) {
+    $results[] = ['label' => 'approved_at on bookings', 'ok' => true, 'msg' => 'Already exists.'];
+} else {
+    try {
+        $db->exec("ALTER TABLE bookings ADD COLUMN approved_at TIMESTAMP NULL DEFAULT NULL AFTER status");
+        $results[] = ['label' => 'approved_at on bookings', 'ok' => true, 'msg' => 'Column added.'];
+    } catch (PDOException $e) {
+        $results[] = ['label' => 'approved_at on bookings', 'ok' => false, 'msg' => $e->getMessage()];
+    }
+}
+
+if (columnExists($db, 'bookings', 'approved_by')) {
+    $results[] = ['label' => 'approved_by on bookings', 'ok' => true, 'msg' => 'Already exists.'];
+} else {
+    try {
+        $db->exec("ALTER TABLE bookings ADD COLUMN approved_by INT NULL AFTER approved_at");
+        $results[] = ['label' => 'approved_by on bookings', 'ok' => true, 'msg' => 'Column added.'];
+    } catch (PDOException $e) {
+        $results[] = ['label' => 'approved_by on bookings', 'ok' => false, 'msg' => $e->getMessage()];
+    }
 }
 ?>
 <!DOCTYPE html>
