@@ -417,6 +417,157 @@ try {
     $results[] = ['label' => 'Additional event packages & services', 'ok' => false, 'msg' => $e->getMessage()];
 }
 
+// ── 17. reviews table ──────────────────────────────────────────────────────
+if (tableExists($db, 'reviews')) {
+    $results[] = ['label' => 'reviews table', 'ok' => true, 'msg' => 'Already exists.'];
+} else {
+    try {
+        $db->exec("
+            CREATE TABLE reviews (
+                review_id       INT AUTO_INCREMENT PRIMARY KEY,
+                booking_id      INT NOT NULL,
+                customer_id     INT NOT NULL,
+                rating          TINYINT UNSIGNED NOT NULL DEFAULT 5,
+                service_rating  TINYINT UNSIGNED NULL,
+                venue_rating    TINYINT UNSIGNED NULL,
+                food_rating     TINYINT UNSIGNED NULL,
+                review_text     TEXT NOT NULL,
+                would_recommend TINYINT(1) NOT NULL DEFAULT 1,
+                status          ENUM('published','hidden') NOT NULL DEFAULT 'published',
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_review_booking (booking_id),
+                INDEX idx_review_customer (customer_id),
+                INDEX idx_review_rating (rating)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        $results[] = ['label' => 'reviews table', 'ok' => true, 'msg' => 'Table created successfully.'];
+    } catch (PDOException $e) {
+        try {
+            $db->exec("
+                CREATE TABLE reviews (
+                    review_id       INT AUTO_INCREMENT PRIMARY KEY,
+                    booking_id      INT NOT NULL,
+                    customer_id     INT NOT NULL,
+                    rating          TINYINT UNSIGNED NOT NULL DEFAULT 5,
+                    service_rating  TINYINT UNSIGNED NULL,
+                    venue_rating    TINYINT UNSIGNED NULL,
+                    food_rating     TINYINT UNSIGNED NULL,
+                    review_text     TEXT NOT NULL,
+                    would_recommend TINYINT(1) NOT NULL DEFAULT 1,
+                    status          ENUM('published','hidden') NOT NULL DEFAULT 'published',
+                    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_review_booking (booking_id),
+                    INDEX idx_review_customer (customer_id),
+                    INDEX idx_review_rating (rating)
+                )
+            ");
+            $results[] = ['label' => 'reviews table', 'ok' => true, 'msg' => 'Table created successfully (fallback engine).'];
+        } catch (PDOException $e2) {
+            $results[] = ['label' => 'reviews table', 'ok' => false, 'msg' => $e2->getMessage()];
+        }
+    }
+}
+
+// ── 18. payment_submissions table ─────────────────────────────────────────
+if (tableExists($db, 'payment_submissions')) {
+    $results[] = ['label' => 'payment_submissions table', 'ok' => true, 'msg' => 'Already exists.'];
+} else {
+    try {
+        $db->exec("
+            CREATE TABLE payment_submissions (
+                submission_id    INT AUTO_INCREMENT PRIMARY KEY,
+                booking_id       INT NOT NULL,
+                customer_id      INT NOT NULL,
+                amount           DECIMAL(10,2) NOT NULL,
+                payment_method   VARCHAR(50) NOT NULL DEFAULT 'gcash',
+                reference_no     VARCHAR(100) NOT NULL,
+                proof_image      VARCHAR(500) NOT NULL,
+                notes            TEXT NULL,
+                status           ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+                rejection_reason TEXT NULL,
+                reviewed_by      INT NULL,
+                reviewed_at      TIMESTAMP NULL DEFAULT NULL,
+                payment_id       INT NULL,
+                created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_sub_booking (booking_id),
+                INDEX idx_sub_customer (customer_id),
+                INDEX idx_sub_status (status)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        $results[] = ['label' => 'payment_submissions table', 'ok' => true, 'msg' => 'Table created successfully.'];
+    } catch (PDOException $e) {
+        try {
+            $db->exec("
+                CREATE TABLE payment_submissions (
+                    submission_id    INT AUTO_INCREMENT PRIMARY KEY,
+                    booking_id       INT NOT NULL,
+                    customer_id      INT NOT NULL,
+                    amount           DECIMAL(10,2) NOT NULL,
+                    payment_method   VARCHAR(50) NOT NULL DEFAULT 'gcash',
+                    reference_no     VARCHAR(100) NOT NULL,
+                    proof_image      VARCHAR(500) NOT NULL,
+                    notes            TEXT NULL,
+                    status           ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+                    rejection_reason TEXT NULL,
+                    reviewed_by      INT NULL,
+                    reviewed_at      TIMESTAMP NULL DEFAULT NULL,
+                    payment_id       INT NULL,
+                    created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_sub_booking (booking_id),
+                    INDEX idx_sub_customer (customer_id),
+                    INDEX idx_sub_status (status)
+                )
+            ");
+            $results[] = ['label' => 'payment_submissions table', 'ok' => true, 'msg' => 'Table created successfully (fallback engine).'];
+        } catch (PDOException $e2) {
+            $results[] = ['label' => 'payment_submissions table', 'ok' => false, 'msg' => $e2->getMessage()];
+        }
+    }
+}
+
+// ── 19. notifications table ────────────────────────────────────────────────
+if (tableExists($db, 'notifications')) {
+    $results[] = ['label' => 'notifications table', 'ok' => true, 'msg' => 'Already exists.'];
+} else {
+    try {
+        $db->exec("
+            CREATE TABLE notifications (
+                notification_id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id         INT NOT NULL,
+                title           VARCHAR(150) NOT NULL,
+                message         TEXT NOT NULL,
+                type            VARCHAR(50) NOT NULL DEFAULT 'info',
+                link            VARCHAR(255) NULL,
+                is_read         TINYINT(1) NOT NULL DEFAULT 0,
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_user_read (user_id, is_read),
+                INDEX idx_user_created (user_id, created_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        $results[] = ['label' => 'notifications table', 'ok' => true, 'msg' => 'Table created successfully.'];
+    } catch (PDOException $e) {
+        try {
+            $db->exec("
+                CREATE TABLE notifications (
+                    notification_id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id         INT NOT NULL,
+                    title           VARCHAR(150) NOT NULL,
+                    message         TEXT NOT NULL,
+                    type            VARCHAR(50) NOT NULL DEFAULT 'info',
+                    link            VARCHAR(255) NULL,
+                    is_read         TINYINT(1) NOT NULL DEFAULT 0,
+                    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_user_read (user_id, is_read),
+                    INDEX idx_user_created (user_id, created_at)
+                )
+            ");
+            $results[] = ['label' => 'notifications table', 'ok' => true, 'msg' => 'Table created successfully (fallback engine).'];
+        } catch (PDOException $e2) {
+            $results[] = ['label' => 'notifications table', 'ok' => false, 'msg' => $e2->getMessage()];
+        }
+    }
+}
+
 // ── 16. approved_at and approved_by on bookings ────────────────────────────
 if (columnExists($db, 'bookings', 'approved_at')) {
     $results[] = ['label' => 'approved_at on bookings', 'ok' => true, 'msg' => 'Already exists.'];

@@ -35,6 +35,16 @@ $revenueData = $revenueStmt->fetchAll();
 // Pending user account approvals
 $pendingUsers = $db->query("SELECT * FROM users WHERE status IN ('pending_approval','inactive') ORDER BY created_at DESC")->fetchAll();
 $pendingAccountsCount = count($pendingUsers);
+
+// Reviews aggregate stats
+$reviewStats = ['avg' => 0, 'count' => 0];
+try {
+    $rRow = $db->query("SELECT ROUND(AVG(rating),1) as avg_rating, COUNT(*) as cnt FROM reviews")->fetch();
+    if ($rRow) {
+        $reviewStats['avg'] = (float)($rRow['avg_rating'] ?? 0);
+        $reviewStats['count'] = (int)($rRow['cnt'] ?? 0);
+    }
+} catch (Exception $e) {}
 ?>
 
 <?php require_once __DIR__ . '/../includes/navbar.php'; ?>
@@ -133,6 +143,13 @@ $pendingAccountsCount = count($pendingUsers);
             <div class="stat-label">Available Venues</div>
         </div>
     </div>
+    <a href="<?= APP_URL ?>/admin/reviews.php" class="stat-card" style="--stat-color:#f1c40f;text-decoration:none;cursor:pointer;">
+        <div class="stat-icon" style="background:rgba(241,196,15,0.2);color:#f1c40f;"><i class="fa-solid fa-star"></i></div>
+        <div class="stat-info">
+            <div class="stat-value"><?= $reviewStats['avg'] > 0 ? $reviewStats['avg'] . ' ★' : 'N/A' ?></div>
+            <div class="stat-label"><?= $reviewStats['count'] ?> Review<?= $reviewStats['count'] == 1 ? '' : 's' ?> <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:0.7rem;opacity:0.7;"></i></div>
+        </div>
+    </a>
 </div>
 
 <div class="grid-2" style="align-items:start;">

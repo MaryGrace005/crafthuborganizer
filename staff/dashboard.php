@@ -65,6 +65,12 @@ $todayStmt = $db->prepare("
 ");
 $todayStmt->execute([$userId]);
 $todayPayments = $todayStmt->fetchAll();
+
+// Pending online payment submissions count
+$pendingSubmissionsCount = 0;
+try {
+    $pendingSubmissionsCount = (int)$db->query("SELECT COUNT(*) FROM payment_submissions WHERE status = 'pending'")->fetchColumn();
+} catch (Exception $e) {}
 ?>
 
 <?php require_once __DIR__ . '/../includes/navbar.php'; ?>
@@ -74,7 +80,13 @@ $todayPayments = $todayStmt->fetchAll();
         <h1>Staff &amp; Cashier Dashboard</h1>
         <p><?= date('l, F j, Y') ?></p>
     </div>
-    <div style="display:flex;gap:10px;">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <?php if ($pendingSubmissionsCount > 0): ?>
+        <a href="<?= APP_URL ?>/staff/payment_submissions.php" class="btn btn-warning" style="font-weight:700;">
+            <i class="fa-solid fa-receipt"></i> Online Submissions
+            <span class="badge badge-danger" style="margin-left:6px;"><?= $pendingSubmissionsCount ?></span>
+        </a>
+        <?php endif; ?>
         <a href="<?= APP_URL ?>/staff/bookings.php?status=pending" class="btn btn-secondary">
             <i class="fa-solid fa-stamp"></i> Review Bookings
             <?php if ($pendingBookingsCount > 0): ?>
@@ -127,6 +139,30 @@ $todayPayments = $todayStmt->fetchAll();
     </a>
 </div>
 
+<!-- Pending Online Payments Alert Card -->
+<?php if ($pendingSubmissionsCount > 0): ?>
+<div class="card" style="border:1px solid rgba(78,205,196,0.5);background:rgba(78,205,196,0.05);margin-bottom:20px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;flex-wrap:wrap;gap:12px;">
+        <div style="display:flex;align-items:center;gap:14px;">
+            <div style="width:44px;height:44px;border-radius:50%;background:rgba(78,205,196,0.2);color:#4ecdc4;display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0;">
+                <i class="fa-solid fa-mobile-screen-button"></i>
+            </div>
+            <div>
+                <h3 style="margin:0;font-size:1.05rem;color:#fff;">
+                    <?= $pendingSubmissionsCount ?> Online Payment Submission<?= $pendingSubmissionsCount > 1 ? 's' : '' ?> Awaiting Verification
+                </h3>
+                <p style="margin:3px 0 0;font-size:0.83rem;color:var(--text-secondary);">
+                    Customers have uploaded GCash / bank transfer payment proofs for review.
+                </p>
+            </div>
+        </div>
+        <a href="<?= APP_URL ?>/staff/payment_submissions.php" class="btn btn-primary" style="font-weight:700;">
+            <i class="fa-solid fa-arrow-right"></i> Review Submissions
+        </a>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- Pending Bookings Approval Alert Card -->
 <?php if ($pendingBookingsCount > 0): ?>
 <div class="card" style="border:1px solid rgba(245,166,35,0.4);background:rgba(245,166,35,0.04);margin-bottom:24px;">
@@ -177,7 +213,7 @@ $todayPayments = $todayStmt->fetchAll();
     <div class="card">
         <div class="card-header">
             <h2 class="card-title"><i class="fa-solid fa-circle-exclamation" style="color:var(--accent-gold);"></i> Needs Payment</h2>
-            <a href="<?= APP_URL ?>/staff/payments.php" class="btn btn-secondary btn-sm">View All</a>
+            <a href="<?= APP_URL ?>/staff/bills.php" class="btn btn-secondary btn-sm">View All</a>
         </div>
         <?php if (empty($pendingPayments)): ?>
             <div class="empty-state" style="padding:30px;">

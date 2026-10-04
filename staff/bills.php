@@ -107,6 +107,9 @@ $sql = "
         b.booking_id,
         b.booking_reference,
         b.total_amount,
+        COALESCE(b.payment_plan, 'full') AS payment_plan,
+        COALESCE(b.discount_amount, 0) AS discount_amount,
+        COALESCE(b.downpayment_amount, 0) AS downpayment_amount,
         b.event_date,
         b.payment_due_date,
         b.status AS booking_status,
@@ -271,7 +274,21 @@ foreach ($bills as $bill) {
                             <span style="font-size:0.72rem;color:var(--text-muted);"><?= $daysLeft ?> days left</span>
                         <?php endif; ?>
                     </td>
-                    <td style="font-weight:700;"><?= formatCurrency($b['total_amount']) ?></td>
+                    <td>
+                        <div style="font-weight:700;font-size:0.92rem;"><?= formatCurrency($b['total_amount']) ?></div>
+                        <?php if (!empty($b['payment_plan'])): ?>
+                            <div style="margin-top:3px;">
+                                <span class="badge" style="font-size:0.68rem;padding:2px 6px;background:<?= $b['payment_plan'] === 'full' ? 'rgba(46,204,113,0.15)' : 'rgba(78,205,196,0.15)' ?>;color:<?= $b['payment_plan'] === 'full' ? '#2ecc71' : 'var(--accent-teal)' ?>;border:1px solid <?= $b['payment_plan'] === 'full' ? 'rgba(46,204,113,0.35)' : 'rgba(78,205,196,0.35)' ?>;font-weight:600;">
+                                    <?= $b['payment_plan'] === 'full' ? 'Full Payment' : 'Downpayment' ?>
+                                </span>
+                            </div>
+                        <?php endif; ?>
+                        <?php if ((float)$b['discount_amount'] > 0): ?>
+                            <div style="font-size:0.7rem;color:#2ecc71;margin-top:2px;">
+                                <i class="fa-solid fa-tag"></i> -<?= formatCurrency($b['discount_amount']) ?>
+                            </div>
+                        <?php endif; ?>
+                    </td>
                     <td style="color:#27ae60;font-weight:700;"><?= formatCurrency($b['total_paid']) ?></td>
                     <td>
                         <div style="display:flex;flex-direction:column;gap:4px;">

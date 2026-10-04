@@ -71,10 +71,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $notes     = sanitize($_POST['notes']         ?? '');
 
     if (empty($errors)) {
-        $db->beginTransaction();
+        $paymentSuccess = false;
+        $newPayId       = 0;
+        $staffId        = (int)($staff['user_id'] ?? $staff['id'] ?? 0);
+        $orNumber       = 'OR-' . date('Y') . '-' . str_pad(rand(1, 99999), 5, '0', STR_PAD_LEFT);
+
         try {
-            $staffId  = $staff['user_id'] ?? $staff['id'];
-            $orNumber = 'OR-' . date('Y') . '-' . str_pad(rand(1, 99999), 5, '0', STR_PAD_LEFT);
+            $db->beginTransaction();
 
             try {
                 $ins = $db->prepare("INSERT INTO payments (booking_id, cashier_id, amount_paid, payment_type, payment_method, reference_no, or_number, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
@@ -83,6 +86,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $ins = $db->prepare("INSERT INTO payments (booking_id, cashier_id, amount_paid, payment_type, or_number) VALUES (?, ?, ?, ?, ?)");
                 $ins->execute([$bookingId, $staffId, $amount, $payType, $orNumber]);
             }
+
+            $newPayId = (int)$db->lastInsertId();
 
             // Update booking status & amount_paid
             try {
@@ -94,15 +99,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             updateBookingPaymentStatus($bookingId);
 
-            $newPayId = (int)$db->lastInsertId();
             $db->commit();
+            $paymentSuccess = true;
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            error_log('Payment processing error: ' . $e->getMessage());
+            $errors[] = 'Payment processing failed. Please try again.';
+        }
+
+        if ($paymentSuccess && $newPayId > 0) {
+            // Send Email Receipt safely
+            try {
+                require_once __DIR__ . '/../includes/mailer.php';
+                sendPaymentReceiptEmail($newPayId);
+            } catch (Throwable $mailEx) {
+                error_log('Receipt email failed: ' . $mailEx->getMessage());
+            }
 
             logAudit($staffId, 'PAYMENT', "Processed payment of " . formatCurrency($amount) . " for booking #{$bookingId}", 'payments');
             setFlash('success', 'Payment of ' . formatCurrency($amount) . ' processed successfully! <a href="' . APP_URL . '/receipt.php?id=' . $newPayId . '" target="_blank" style="color:#fff;text-decoration:underline;margin-left:8px;font-weight:700;"><i class="fa-solid fa-receipt"></i> View Official Receipt (' . $orNumber . ')</a>');
             redirect($returnUrl);
-        } catch (Exception $e) {
-            $db->rollBack();
-            $errors[] = 'Payment failed. Please try again.';
         }
     }
 }

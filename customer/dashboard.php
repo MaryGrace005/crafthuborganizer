@@ -37,8 +37,38 @@ $payStmt = $db->prepare("
     WHERE b.customer_id = ?
     ORDER BY py.payment_date DESC LIMIT 4
 ");
-$payStmt->execute([$user['user_id'] ?? $user['id']]);
+$payStmt->execute([$userId]);
 $recentReceipts = $payStmt->fetchAll();
+
+// Pending online payment submissions for customer
+$pendingSubmissions = [];
+try {
+    $psStmt = $db->prepare("
+        SELECT ps.*, b.booking_id, b.booking_reference, p.package_name
+        FROM payment_submissions ps
+        JOIN bookings b ON ps.booking_id = b.booking_id
+        JOIN packages p ON b.package_id = p.package_id
+        WHERE ps.customer_id = ? AND ps.status = 'pending'
+        ORDER BY ps.created_at DESC
+    ");
+    $psStmt->execute([$userId]);
+    $pendingSubmissions = $psStmt->fetchAll();
+} catch (Exception $e) {}
+
+// Completed bookings awaiting review
+$unreviewedBookings = [];
+try {
+    $urStmt = $db->prepare("
+        SELECT b.*, b.booking_id AS id, p.package_name
+        FROM bookings b
+        JOIN packages p ON b.package_id = p.package_id
+        WHERE b.customer_id = ? AND b.status = 'Completed'
+          AND b.booking_id NOT IN (SELECT booking_id FROM reviews WHERE customer_id = ?)
+        ORDER BY b.event_date DESC LIMIT 3
+    ");
+    $urStmt->execute([$userId, $userId]);
+    $unreviewedBookings = $urStmt->fetchAll();
+} catch (Exception $e) {}
 ?>
 
 <?php require_once __DIR__ . '/../includes/navbar.php'; ?>
@@ -106,6 +136,51 @@ $recentReceipts = $payStmt->fetchAll();
     </div>
 </div>
 
+<!-- Pending Payment Verification Notice -->
+<?php if (!empty($pendingSubmissions)): ?>
+<div class="card" style="border:1px solid rgba(78,205,196,0.4);background:rgba(78,205,196,0.06);margin-bottom:20px;">
+    <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+            <div style="width:40px;height:40px;border-radius:50%;background:rgba(78,205,196,0.2);color:#4ecdc4;display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0;">
+                <i class="fa-solid fa-hourglass-half"></i>
+            </div>
+            <div>
+                <h4 style="margin:0;color:#fff;font-size:0.95rem;">Payment Verification in Progress</h4>
+                <div style="font-size:0.82rem;color:var(--text-secondary);margin-top:2px;">
+                    <?php $firstPs = $pendingSubmissions[0]; ?>
+                    Submitted <?= formatCurrency($firstPs['amount']) ?> via <?= strtoupper($firstPs['payment_method']) ?> (Ref: <?= htmlspecialchars($firstPs['reference_no']) ?>). Our cashier is verifying your transaction.
+                </div>
+            </div>
+        </div>
+        <a href="<?= APP_URL ?>/customer/bookings.php" class="btn btn-secondary btn-sm" style="color:var(--accent-teal);">
+            View My Bookings
+        </a>
+    </div>
+</div>
+<?php endif; ?>
+
+<!-- Review Prompt Banner -->
+<?php if (!empty($unreviewedBookings)): ?>
+<div class="card" style="border:1px solid rgba(245,166,35,0.4);background:rgba(245,166,35,0.06);margin-bottom:20px;">
+    <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+            <div style="width:40px;height:40px;border-radius:50%;background:rgba(245,166,35,0.2);color:var(--accent-gold);display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0;">
+                <i class="fa-solid fa-star"></i>
+            </div>
+            <div>
+                <h4 style="margin:0;color:#fff;font-size:0.95rem;">How was your event?</h4>
+                <div style="font-size:0.82rem;color:var(--text-secondary);margin-top:2px;">
+                    Your booking for <strong><?= htmlspecialchars($unreviewedBookings[0]['package_name']) ?></strong> has concluded. We'd love your feedback!
+                </div>
+            </div>
+        </div>
+        <a href="<?= APP_URL ?>/customer/review.php?booking_id=<?= $unreviewedBookings[0]['id'] ?>" class="btn btn-warning btn-sm" style="font-weight:700;">
+            <i class="fa-solid fa-star"></i> Leave a Review
+        </a>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- Recent Bookings -->
 <div class="card">
     <div class="card-header">
@@ -135,6 +210,7 @@ $recentReceipts = $payStmt->fetchAll();
                         <th>Balance</th>
                         <th>Payment Due</th>
                         <th>Payment Status</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -181,6 +257,18 @@ $recentReceipts = $payStmt->fetchAll();
                             <?php endif; ?>
                         </td>
                         <td><?= statusBadge($payStatus) ?></td>
+                        <td style="white-space:nowrap;">
+                            <div style="display:flex;gap:6px;align-items:center;">
+                                <a href="<?= APP_URL ?>/invoice.php?id=<?= $b['id'] ?>" target="_blank" class="btn btn-secondary btn-sm" title="Invoice / SOA" style="color:var(--accent-teal);padding:4px 8px;font-size:0.75rem;">
+                                    <i class="fa-solid fa-file-invoice"></i> SOA
+                                </a>
+                                <?php if ($balance > 0 && in_array(strtolower($b['status']), ['confirmed', 'paid'])): ?>
+                                    <a href="<?= APP_URL ?>/customer/submit_payment.php?id=<?= $b['id'] ?>" class="btn btn-warning btn-sm" style="padding:4px 8px;font-size:0.75rem;" title="Submit Online Payment">
+                                        <i class="fa-solid fa-credit-card"></i> Pay
+                                    </a>
+                                <?php endif; ?>
+                            </div>
+                        </td>
                     </tr>
                     <?php endforeach; ?>
                 </tbody>

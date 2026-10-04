@@ -15,10 +15,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Admin is strictly not permitted to approve/confirm bookings
         if ($newStatus === 'confirmed') {
             setFlash('error', 'Only cashiers are authorized to approve customer bookings. Administrators can manage records, schedules, and cancellations.');
-        } elseif ($newStatus === 'cancelled' && $id > 0) {
-            $stmt = $db->prepare("UPDATE bookings SET status = 'Cancelled' WHERE booking_id = ?");
+        } elseif ($newStatus === 'completed' && $id > 0) {
+            $stmt = $db->prepare("UPDATE bookings SET status = 'Completed' WHERE booking_id = ?");
             $stmt->execute([$id]);
-            logAudit($_SESSION['user_id'], 'CANCEL_BOOKING', "Admin marked booking #{$id} as Cancelled", 'bookings');
+            logAudit($_SESSION['user_id'], 'COMPLETE_BOOKING', "Admin marked booking #{$id} as Completed", 'bookings');
+
+            $bk = $db->query("SELECT customer_id, booking_reference FROM bookings WHERE booking_id = $id")->fetch();
+            if ($bk) {
+                createNotification((int)$bk['customer_id'], "Event Completed 🎉", "Your event has been marked as Completed by the administrator. Thank you for choosing CraftHub Organizer!", "info", APP_URL . "/customer/bookings.php");
+            }
+            setFlash('success', "Booking #" . str_pad($id, 5, '0', STR_PAD_LEFT) . " marked as Completed.");
+        } elseif ($newStatus === 'cancelled' && $id > 0) {
+            $reason = sanitize($_POST['reason'] ?? 'Cancelled by Admin');
+            $stmt = $db->prepare("UPDATE bookings SET status = 'Cancelled', cancellation_reason = ? WHERE booking_id = ?");
+            $stmt->execute([$reason, $id]);
+            logAudit($_SESSION['user_id'], 'CANCEL_BOOKING', "Admin marked booking #{$id} as Cancelled. Reason: {$reason}", 'bookings');
+
+            $bk = $db->query("SELECT customer_id, booking_reference FROM bookings WHERE booking_id = $id")->fetch();
+            if ($bk) {
+                createNotification((int)$bk['customer_id'], "Booking Cancelled", "Your booking was cancelled by the administrator. Reason: {$reason}", "danger", APP_URL . "/customer/bookings.php");
+            }
             setFlash('info', "Booking #" . str_pad($id, 5, '0', STR_PAD_LEFT) . " has been marked as Cancelled.");
         }
     } elseif ($action === 'delete') {
@@ -61,6 +77,11 @@ $bookings = $stmt->fetchAll();
     <div>
         <h1>All Bookings</h1>
         <p>Review and manage customer event booking records. <span style="color:var(--accent-gold);"><i class="fa-solid fa-shield-halved"></i> Customer bookings are approved exclusively by Cashiers.</span></p>
+    </div>
+    <div>
+        <a href="<?= APP_URL ?>/export.php?type=bookings" class="btn btn-secondary">
+            <i class="fa-solid fa-file-excel" style="color:#27ae60;"></i> Export CSV
+        </a>
     </div>
 </div>
 
@@ -331,6 +352,18 @@ $bookings = $stmt->fetchAll();
                             <span class="cur">₱</span>
                             <span class="amt"><?= number_format((float)$b['total_amount'], 0, '.', ',') ?></span>
                         </div>
+                        <?php if (!empty($b['payment_plan'])): ?>
+                            <div style="margin-top:4px;">
+                                <span class="badge" style="font-size:0.68rem;padding:2px 6px;background:<?= $b['payment_plan'] === 'full' ? 'rgba(46,204,113,0.15)' : 'rgba(78,205,196,0.15)' ?>;color:<?= $b['payment_plan'] === 'full' ? '#2ecc71' : 'var(--accent-teal)' ?>;border:1px solid <?= $b['payment_plan'] === 'full' ? 'rgba(46,204,113,0.35)' : 'rgba(78,205,196,0.35)' ?>;font-weight:600;">
+                                    <?= $b['payment_plan'] === 'full' ? 'Full Payment' : 'Downpayment' ?>
+                                </span>
+                            </div>
+                        <?php endif; ?>
+                        <?php if ((float)($b['discount_amount'] ?? 0) > 0): ?>
+                            <div style="font-size:0.7rem;color:#2ecc71;margin-top:2px;">
+                                <i class="fa-solid fa-tag"></i> -<?= formatCurrency($b['discount_amount']) ?>
+                            </div>
+                        <?php endif; ?>
                     </td>
                     <td>
                         <?= statusBadge($b['status']) ?>
@@ -358,9 +391,23 @@ $bookings = $stmt->fetchAll();
                     </td>
                     <td>
                         <div class="bk-actions">
+                            <a href="<?= APP_URL ?>/invoice.php?id=<?= $b['id'] ?>" target="_blank" class="btn-bill" style="background:rgba(78,205,196,0.15);color:#4ecdc4;border:1px solid rgba(78,205,196,0.3);" title="Statement of Account / Invoice">
+                                <i class="fa-solid fa-file-invoice"></i> SOA
+                            </a>
                             <a href="<?= APP_URL ?>/admin/bills.php?search=<?= urlencode(getBookingRef($b)) ?>" class="btn-bill" title="View Bill & Manage Payments">
                                 <i class="fa-solid fa-file-invoice-dollar"></i> Bill
                             </a>
+                            <?php if (in_array($b['status'], ['Confirmed', 'Paid'])): ?>
+                            <form method="POST" style="display:inline;margin:0;">
+                                <input type="hidden" name="action" value="update_status">
+                                <input type="hidden" name="status" value="completed">
+                                <input type="hidden" name="id" value="<?= $b['id'] ?>">
+                                <button type="submit" class="btn-bill" style="background:rgba(39,174,96,0.15);color:#27ae60;border:1px solid rgba(39,174,96,0.3);"
+                                        data-confirm="Mark booking <?= htmlspecialchars(getBookingRef($b)) ?> as Completed?" title="Mark Completed">
+                                    <i class="fa-solid fa-flag-checkered"></i> Done
+                                </button>
+                            </form>
+                            <?php endif; ?>
                             <a href="<?= APP_URL ?>/booking_images.php?booking_id=<?= $b['id'] ?>" class="btn-photos" title="View & Upload Photos">
                                 <i class="fa-solid fa-camera"></i> Photos
                             </a>
@@ -386,6 +433,8 @@ $bookings = $stmt->fetchAll();
                                     'date'       => formatDate($b['event_date']),
                                     'time'       => date('g:i A', strtotime($b['event_time'] ?? '09:00:00')),
                                     'due'        => date('M d, Y', strtotime(getBookingPaymentDueDate($b))),
+                                    'plan'       => (!empty($b['payment_plan']) && $b['payment_plan'] === 'downpayment' ? 'Downpayment Plan' : 'Full Payment Plan'),
+                                    'discount'   => ((float)($b['discount_amount'] ?? 0) > 0 ? formatCurrency($b['discount_amount']) : ''),
                                     'total'      => formatCurrency($realTotalBtn),
                                     'paid'       => formatCurrency($realPaidBtn),
                                     'balance'    => formatCurrency($balanceBtn),
@@ -489,6 +538,14 @@ $bookings = $stmt->fetchAll();
                 </div>
                 <div style="display:grid;gap:8px;font-size:0.88rem;">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <span style="color:var(--text-secondary);">Payment Plan</span>
+                        <strong id="modal-plan" style="color:var(--accent-teal);"></strong>
+                    </div>
+                    <div id="modal-discount-row" style="display:none;justify-content:space-between;align-items:center;">
+                        <span style="color:#2ecc71;"><i class="fa-solid fa-tag"></i> Discount Saved</span>
+                        <strong id="modal-discount" style="color:#2ecc71;"></strong>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
                         <span style="color:var(--text-secondary);">Total Amount</span>
                         <strong id="modal-total" style="color:var(--accent-gold);"></strong>
                     </div>
@@ -564,6 +621,14 @@ document.querySelectorAll('.btn-details').forEach(btn => {
         document.getElementById('modal-due').textContent      = data.due      || '—';
 
         // Payment breakdown
+        document.getElementById('modal-plan').textContent    = data.plan || 'Full Payment Plan';
+        const discRow = document.getElementById('modal-discount-row');
+        if (data.discount) {
+            discRow.style.display = 'flex';
+            document.getElementById('modal-discount').textContent = '-' + data.discount;
+        } else {
+            discRow.style.display = 'none';
+        }
         document.getElementById('modal-total').textContent   = data.total   || '₱ 0.00';
         document.getElementById('modal-paid').textContent    = data.paid    || '₱ 0.00';
         document.getElementById('modal-balance').textContent = data.balance || '₱ 0.00';

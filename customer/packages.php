@@ -13,14 +13,23 @@ $ongoingBookings = getCustomerOngoingBookings($userId);
 $hasOngoingPayment = !empty($ongoingBookings);
 $totalOngoingBalance = array_sum(array_column($ongoingBookings, 'calculated_balance'));
 
-// Fetch active packages with slots count
+// Ensure discount columns exist
+ensureDiscountColumns($db);
+
+// Fetch active packages with live available slot counts
 $packages = $db->query("
     SELECT p.*, p.package_id AS id, p.package_name AS name,
            p.base_price AS price,
+           COALESCE(p.full_payment_discount_percent, 10.00) AS full_payment_discount_percent,
+           COALESCE(p.downpayment_discount_percent, 5.00) AS downpayment_discount_percent,
+           COALESCE(p.downpayment_percent, 50.00) AS downpayment_percent,
            COALESCE(p.max_slots, 5) AS max_slots,
            (SELECT COUNT(*) FROM bookings b
             WHERE b.package_id = p.package_id
-            AND b.status NOT IN ('Cancelled')) AS booked_count
+            AND b.status IN ('Pending','Confirmed','Paid')) AS active_bookings,
+           GREATEST(0, COALESCE(p.max_slots, 5) - (SELECT COUNT(*) FROM bookings b
+            WHERE b.package_id = p.package_id
+            AND b.status IN ('Pending','Confirmed','Paid'))) AS available_slots
     FROM packages p
     WHERE p.status = 'active'
     ORDER BY p.base_price ASC
@@ -179,10 +188,11 @@ $catIcons = [
     <div class="packages-page grid-auto" style="padding-bottom: 40px;">
         <?php foreach ($packages as $pkg):
             $maxSlots    = (int)($pkg['max_slots'] ?? 5);
-            $bookedCount = (int)($pkg['booked_count'] ?? 0);
-            $available   = max(0, $maxSlots - $bookedCount);
+            $available   = (int)($pkg['available_slots'] ?? 0);  // from DB: slots minus active bookings
+            $activeBooks = (int)($pkg['active_bookings'] ?? 0);
+            $bookedCount = $activeBooks; // used for the progress bar
             $isFull      = $available <= 0;
-            $pctBooked   = $maxSlots > 0 ? min(100, round($bookedCount / $maxSlots * 100)) : 100;
+            $pctBooked   = $maxSlots > 0 ? min(100, round($activeBooks / $maxSlots * 100)) : 100;
             $slotColor   = $available <= 1 ? '#e94560' : ($available <= 3 ? '#f5a623' : '#27ae60');
             $components  = $pkg['components'] ?? [];
             
@@ -216,9 +226,34 @@ $catIcons = [
 
             <div class="package-card-header" style="padding-top:14px;">
                 <div class="package-card-title"><?= htmlspecialchars($pkg['name'] ?? $pkg['package_name']) ?></div>
-                <div class="package-price">
-                    <?= formatCurrency($pkg['price'] ?? $pkg['base_price']) ?>
-                    <span>/ booking</span>
+                <div class="package-price" style="display:flex;flex-direction:column;align-items:flex-start;gap:2px;">
+                    <?php
+                    $basePrice = (float)($pkg['price'] ?? $pkg['base_price']);
+                    $fullDiscPct = (float)($pkg['full_payment_discount_percent'] ?? 10);
+                    $dpDiscPct = (float)($pkg['downpayment_discount_percent'] ?? 5);
+                    $discountedFullPrice = $basePrice * (1 - ($fullDiscPct / 100));
+                    ?>
+                    <?php if ($fullDiscPct > 0 || $dpDiscPct > 0): ?>
+                        <div style="font-size:0.85rem;text-decoration:line-through;color:var(--text-muted);font-weight:400;">
+                            <?= formatCurrency($basePrice) ?>
+                        </div>
+                        <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">
+                            <span style="font-size:1.35rem;font-weight:700;color:var(--accent-teal);line-height:1.2;">
+                                <?= formatCurrency($discountedFullPrice) ?>
+                            </span>
+                            <span class="badge" style="background:rgba(46,204,113,0.15);color:#2ecc71;border:1px solid rgba(46,204,113,0.35);font-size:0.75rem;padding:2px 8px;border-radius:12px;font-weight:600;">
+                                <i class="fa-solid fa-tag"></i> Up to <?= rtrim(rtrim(number_format($fullDiscPct, 2), '0'), '.') ?>% OFF
+                            </span>
+                        </div>
+                        <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px;">
+                            Full: <?= rtrim(rtrim(number_format($fullDiscPct, 2), '0'), '.') ?>% off &bull; DP: <?= rtrim(rtrim(number_format($dpDiscPct, 2), '0'), '.') ?>% off
+                        </div>
+                    <?php else: ?>
+                        <div style="font-size:1.35rem;font-weight:700;color:var(--accent-teal);">
+                            <?= formatCurrency($basePrice) ?>
+                            <span style="font-size:0.85rem;font-weight:normal;color:var(--text-muted);">/ booking</span>
+                        </div>
+                    <?php endif; ?>
                 </div>
             </div>
 

@@ -3,21 +3,25 @@ $pageTitle = 'Manage Packages';
 require_once __DIR__ . '/../includes/header.php';
 requireRole(['admin']);
 $db = getDB();
+ensureDiscountColumns($db);
 
 // Handle POST actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
     if ($action === 'add' || $action === 'edit') {
-        $name        = sanitize($_POST['name']        ?? '');
-        $desc        = sanitize($_POST['description'] ?? '');
-        $price       = (float)($_POST['price']        ?? 0);
-        $maxSlots    = max(1, (int)($_POST['max_slots'] ?? 5));
-        $eventType   = sanitize($_POST['event_type']  ?? 'Wedding');
-        $imageUrl    = sanitize($_POST['image_url']   ?? '');
-        $status      = in_array($_POST['status'] ?? '', ['active','inactive']) ? $_POST['status'] : 'active';
-        $inclusions  = trim($_POST['inclusions'] ?? '');
-        $userId      = $_SESSION['user_id'] ?? 0;
+        $name                       = sanitize($_POST['name']        ?? '');
+        $desc                       = sanitize($_POST['description'] ?? '');
+        $price                      = (float)($_POST['price']        ?? 0);
+        $maxSlots                   = max(1, (int)($_POST['max_slots'] ?? 5));
+        $eventType                  = sanitize($_POST['event_type']  ?? 'Wedding');
+        $imageUrl                   = sanitize($_POST['image_url']   ?? '');
+        $status                     = in_array($_POST['status'] ?? '', ['active','inactive']) ? $_POST['status'] : 'active';
+        $inclusions                 = trim($_POST['inclusions'] ?? '');
+        $userId                     = $_SESSION['user_id'] ?? 0;
+        $fullDiscountPct            = max(0.0, min(100.0, (float)($_POST['full_payment_discount_percent'] ?? 10.0)));
+        $downDiscountPct            = max(0.0, min(100.0, (float)($_POST['downpayment_discount_percent']  ?? 5.0)));
+        $downPayPct                 = max(1.0, min(100.0, (float)($_POST['downpayment_percent']            ?? 50.0)));
 
         // ── Handle file upload ─────────────────────────────────────────
         $uploadDir = __DIR__ . '/../uploads/packages/';
@@ -53,8 +57,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($action === 'add') {
             try {
-                $db->prepare("INSERT INTO packages (package_name, event_type, base_price, max_slots, description, image_url, status) VALUES (?,?,?,?,?,?,?)")
-                   ->execute([$name, $eventType, $price, $maxSlots, $desc, $imageUrl, $status]);
+                $db->prepare("INSERT INTO packages (package_name, event_type, base_price, max_slots, description, image_url, status, full_payment_discount_percent, downpayment_discount_percent, downpayment_percent) VALUES (?,?,?,?,?,?,?,?,?,?)")
+                   ->execute([$name, $eventType, $price, $maxSlots, $desc, $imageUrl, $status, $fullDiscountPct, $downDiscountPct, $downPayPct]);
             } catch (PDOException $e) {
                 // Fallback if image_url column doesn't exist yet
                 $db->prepare("INSERT INTO packages (package_name, event_type, base_price, max_slots, description, status) VALUES (?,?,?,?,?,?)")
@@ -66,8 +70,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $packageId = (int)($_POST['id'] ?? 0);
             try {
-                $db->prepare("UPDATE packages SET package_name=?, event_type=?, base_price=?, max_slots=?, description=?, image_url=?, status=? WHERE package_id=?")
-                   ->execute([$name, $eventType, $price, $maxSlots, $desc, $imageUrl, $status, $packageId]);
+                $db->prepare("UPDATE packages SET package_name=?, event_type=?, base_price=?, max_slots=?, description=?, image_url=?, status=?, full_payment_discount_percent=?, downpayment_discount_percent=?, downpayment_percent=? WHERE package_id=?")
+                   ->execute([$name, $eventType, $price, $maxSlots, $desc, $imageUrl, $status, $fullDiscountPct, $downDiscountPct, $downPayPct, $packageId]);
             } catch (PDOException $e) {
                 $db->prepare("UPDATE packages SET package_name=?, event_type=?, base_price=?, max_slots=?, description=?, status=? WHERE package_id=?")
                    ->execute([$name, $eventType, $price, $maxSlots, $desc, $status, $packageId]);
@@ -125,10 +129,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Fetch packages
+// Fetch packages with live available slots
 $packages = $db->query("
     SELECT p.*, p.package_id AS id, p.package_name AS name, p.base_price AS price, COALESCE(p.max_slots, 5) AS max_slots,
-           (SELECT COUNT(*) FROM bookings WHERE package_id = p.package_id AND status != 'Cancelled') AS booking_count
+           COALESCE(p.full_payment_discount_percent, 10) AS full_payment_discount_percent,
+           COALESCE(p.downpayment_discount_percent, 5)   AS downpayment_discount_percent,
+           COALESCE(p.downpayment_percent, 50)           AS downpayment_percent,
+           (SELECT COUNT(*) FROM bookings WHERE package_id = p.package_id AND status NOT IN ('Cancelled')) AS booking_count,
+           (SELECT COUNT(*) FROM bookings WHERE package_id = p.package_id AND status IN ('Pending','Confirmed','Paid')) AS active_bookings,
+           GREATEST(0, COALESCE(p.max_slots, 5) - (SELECT COUNT(*) FROM bookings WHERE package_id = p.package_id AND status IN ('Pending','Confirmed','Paid'))) AS available_slots
     FROM packages p 
     ORDER BY p.package_id DESC
 ")->fetchAll();
@@ -436,7 +445,7 @@ unset($p);
                     <th>Package Name</th>
                     <th>Event Type</th>
                     <th>Base Price</th>
-                    <th>Max Slots</th>
+                    <th>Available Slots</th>
                     <th>Included Details</th>
                     <th>Bookings</th>
                     <th>Status</th>
@@ -465,11 +474,24 @@ unset($p);
                             <span class="price-amount"><?= number_format((float)$p['price'], 0, '.', ',') ?></span>
                         </div>
                     </td>
+                    <?php
+                        $availSlots  = (int)$p['available_slots'];
+                        $maxSlots    = (int)$p['max_slots'];
+                        $activeBooks = (int)$p['active_bookings'];
+                        $slotColor   = $availSlots <= 0 ? '#e94560' : ($availSlots <= 2 ? '#f5a623' : '#27ae60');
+                        $slotBg      = $availSlots <= 0 ? 'rgba(233,69,96,0.12)' : ($availSlots <= 2 ? 'rgba(245,166,35,0.12)' : 'rgba(39,174,96,0.12)');
+                        $slotBorder  = $availSlots <= 0 ? 'rgba(233,69,96,0.35)' : ($availSlots <= 2 ? 'rgba(245,166,35,0.35)' : 'rgba(39,174,96,0.28)');
+                        $slotLabel   = $availSlots <= 0 ? 'Full' : 'Available';
+                        $slotIcon    = $availSlots <= 0 ? 'fa-ban' : ($availSlots <= 2 ? 'fa-triangle-exclamation' : 'fa-circle-check');
+                    ?>
                     <td>
-                        <div class="slots-chip">
-                            <span class="slots-icon"><i class="fa-solid fa-users"></i></span>
-                            <span class="slots-count"><?= (int)$p['max_slots'] ?></span>
-                            <span class="slots-label">Slots</span>
+                        <div title="<?= $activeBooks ?> active booking(s) / <?= $maxSlots ?> max slots" style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;padding:6px 12px;background:<?= $slotBg ?>;border:1px solid <?= $slotBorder ?>;border-radius:12px;min-width:80px;text-align:center;">
+                            <div style="display:flex;align-items:center;gap:5px;">
+                                <i class="fa-solid <?= $slotIcon ?>" style="color:<?= $slotColor ?>;font-size:0.75rem;"></i>
+                                <span style="font-size:1.05rem;font-weight:800;color:<?= $slotColor ?>;line-height:1;"><?= $availSlots ?></span>
+                                <span style="font-size:0.72rem;color:<?= $slotColor ?>;opacity:0.85;font-weight:700;"><?= $slotLabel ?></span>
+                            </div>
+                            <div style="font-size:0.68rem;color:var(--text-muted);margin-top:1px;"><?= $activeBooks ?> / <?= $maxSlots ?> booked</div>
                         </div>
                     </td>
                     <td>
@@ -494,22 +516,25 @@ unset($p);
                             <span style="color:var(--text-muted);font-size:0.8rem;font-style:italic;">No inclusions set</span>
                         <?php endif; ?>
                     </td>
-                    <td><span class="badge badge-secondary"><?= $p['booking_count'] ?></span></td>
+                    <td><span class="badge badge-secondary" title="Total non-cancelled bookings"><?= $p['booking_count'] ?></span></td>
                     <td><?= statusBadge($p['status']) ?></td>
                     <td>
                         <div class="pkg-actions">
                             <button class="btn-edit-pkg"
                                 data-modal="editPackageModal"
                                 data-edit='<?= json_encode([
-                                    'id'          => $p['id'],
-                                    'name'        => $p['name'],
-                                    'event_type'  => $p['event_type'] ?? 'Wedding',
-                                    'price'       => $p['price'],
-                                    'max_slots'   => $p['max_slots'],
-                                    'image_url'   => $p['image_url'] ?? '',
-                                    'description' => $p['description'],
-                                    'status'      => $p['status'],
-                                    'inclusions'  => $p['inclusions_text']
+                                    'id'                             => $p['id'],
+                                    'name'                           => $p['name'],
+                                    'event_type'                     => $p['event_type'] ?? 'Wedding',
+                                    'price'                          => $p['price'],
+                                    'max_slots'                      => $p['max_slots'],
+                                    'image_url'                      => $p['image_url'] ?? '',
+                                    'description'                    => $p['description'],
+                                    'status'                         => $p['status'],
+                                    'inclusions'                     => $p['inclusions_text'],
+                                    'full_payment_discount_percent'  => $p['full_payment_discount_percent'],
+                                    'downpayment_discount_percent'   => $p['downpayment_discount_percent'],
+                                    'downpayment_percent'            => $p['downpayment_percent'],
                                 ], JSON_HEX_APOS | JSON_HEX_QUOT) ?>'>
                                 <i class="fa-solid fa-pen-to-square"></i> Edit
                             </button>
@@ -569,6 +594,33 @@ unset($p);
                             <option value="active" selected>Active</option>
                             <option value="inactive">Inactive</option>
                         </select>
+                    </div>
+                </div>
+                <!-- Discount Configuration -->
+                <div style="background:rgba(245,166,35,0.07);border:1px solid rgba(245,166,35,0.25);border-radius:12px;padding:14px 16px;margin-bottom:4px;">
+                    <div style="font-size:0.78rem;font-weight:800;color:var(--accent-gold);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px;"><i class="fa-solid fa-tag"></i> Discount Settings</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Full Payment Discount %
+                                <span style="font-size:0.72rem;color:var(--text-muted);font-weight:400;">(customer pays full amount)</span>
+                            </label>
+                            <input type="number" name="full_payment_discount_percent" class="form-control" step="0.01" min="0" max="100" value="10" placeholder="10">
+                            <div class="form-hint">Discount if customer pays the full package price upfront (e.g. 10%).</div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Downpayment Discount %
+                                <span style="font-size:0.72rem;color:var(--text-muted);font-weight:400;">(customer pays partial)</span>
+                            </label>
+                            <input type="number" name="downpayment_discount_percent" class="form-control" step="0.01" min="0" max="100" value="5" placeholder="5">
+                            <div class="form-hint">Smaller discount if customer pays a downpayment first (e.g. 5%).</div>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label class="form-label">Required Downpayment %
+                            <span style="font-size:0.72rem;color:var(--text-muted);font-weight:400;">(of discounted total)</span>
+                        </label>
+                        <input type="number" name="downpayment_percent" class="form-control" step="0.01" min="1" max="100" value="50" placeholder="50">
+                        <div class="form-hint">Percentage of the discounted total the customer must pay as downpayment (e.g. 50%).</div>
                     </div>
                 </div>
                 <div class="form-group">
@@ -644,6 +696,24 @@ Decoration: Floral & Table Backdrop"></textarea>
                             <option value="active">Active</option>
                             <option value="inactive">Inactive</option>
                         </select>
+                    </div>
+                </div>
+                <!-- Discount Configuration -->
+                <div style="background:rgba(245,166,35,0.07);border:1px solid rgba(245,166,35,0.25);border-radius:12px;padding:14px 16px;margin-bottom:4px;">
+                    <div style="font-size:0.78rem;font-weight:800;color:var(--accent-gold);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px;"><i class="fa-solid fa-tag"></i> Discount Settings</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Full Payment Discount %</label>
+                            <input type="number" name="full_payment_discount_percent" class="form-control" step="0.01" min="0" max="100" placeholder="10">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Downpayment Discount %</label>
+                            <input type="number" name="downpayment_discount_percent" class="form-control" step="0.01" min="0" max="100" placeholder="5">
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label class="form-label">Required Downpayment %</label>
+                        <input type="number" name="downpayment_percent" class="form-control" step="0.01" min="1" max="100" placeholder="50">
                     </div>
                 </div>
                 <div class="form-group">

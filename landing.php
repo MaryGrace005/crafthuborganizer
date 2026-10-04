@@ -35,6 +35,27 @@ function getLandingPackages(): array {
 
 $packages = getLandingPackages();
 
+function getLandingReviews(): array {
+    try {
+        $db = getDB();
+        $stmt = $db->query("
+            SELECT r.*, u.name as customer_name, p.package_name
+            FROM reviews r
+            JOIN users u ON r.customer_id = u.user_id
+            JOIN bookings b ON r.booking_id = b.booking_id
+            JOIN packages p ON b.package_id = p.package_id
+            WHERE r.status = 'published'
+            ORDER BY r.rating DESC, r.created_at DESC
+            LIMIT 3
+        ");
+        return $stmt->fetchAll() ?: [];
+    } catch (Exception $e) {
+        return [];
+    }
+}
+
+$landingReviews = getLandingReviews();
+
 $defaultImages = [
     'Wedding'    => 'assets/images/packages/wedding.png',
     'Birthday'   => 'assets/images/packages/birthday.png',
@@ -435,53 +456,91 @@ $pkgFeatured = [false, true, false]; // middle = featured
         </div>
 
         <div class="testimonials-grid">
-            <div class="testimonial-card reveal reveal-delay-1">
-                <div class="testimonial-stars">
-                    <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
-                    <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
-                    <i class="fa-solid fa-star"></i>
-                </div>
-                <p class="testimonial-text">"CraftHub made booking our kids' craft birthday party incredibly smooth. The booking system is so easy — I had a confirmed venue in under 5 minutes!"</p>
-                <div class="testimonial-author">
-                    <div class="testimonial-avatar" style="background: linear-gradient(135deg, #e94560, #c0392b);">JL</div>
-                    <div>
-                        <div class="testimonial-name">Joyce Lim</div>
-                        <div class="testimonial-role">Parent & Craft Enthusiast</div>
+            <?php if (!empty($landingReviews)): ?>
+                <?php 
+                $gradients = [
+                    'linear-gradient(135deg, #e94560, #c0392b)',
+                    'linear-gradient(135deg, #4ecdc4, #1a9e96)',
+                    'linear-gradient(135deg, #f5a623, #e67e22)'
+                ];
+                $i = 0;
+                foreach ($landingReviews as $rev): 
+                    $grad = $gradients[$i % count($gradients)];
+                    $words = explode(' ', trim($rev['customer_name']));
+                    $initials = strtoupper(substr($words[0] ?? 'C', 0, 1) . substr($words[1] ?? '', 0, 1));
+                    if (strlen($initials) < 2) $initials = strtoupper(substr($rev['customer_name'] ?? 'C', 0, 2));
+                    $rating = (int)($rev['rating'] ?? 5);
+                    $i++;
+                ?>
+                <div class="testimonial-card reveal reveal-delay-<?= min($i, 3) ?>">
+                    <div class="testimonial-stars">
+                        <?php for ($s = 1; $s <= 5; $s++): ?>
+                            <?php if ($s <= $rating): ?>
+                                <i class="fa-solid fa-star"></i>
+                            <?php else: ?>
+                                <i class="fa-regular fa-star" style="opacity:0.3;"></i>
+                            <?php endif; ?>
+                        <?php endfor; ?>
+                    </div>
+                    <p class="testimonial-text">"<?= htmlspecialchars($rev['review_text']) ?>"</p>
+                    <div class="testimonial-author">
+                        <div class="testimonial-avatar" style="background: <?= $grad ?>;"><?= htmlspecialchars($initials) ?></div>
+                        <div>
+                            <div class="testimonial-name"><?= htmlspecialchars($rev['customer_name']) ?></div>
+                            <div class="testimonial-role"><?= htmlspecialchars($rev['package_name']) ?> • Verified Customer</div>
+                        </div>
                     </div>
                 </div>
-            </div>
+                <?php endforeach; ?>
+            <?php else: ?>
+                <div class="testimonial-card reveal reveal-delay-1">
+                    <div class="testimonial-stars">
+                        <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
+                        <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
+                        <i class="fa-solid fa-star"></i>
+                    </div>
+                    <p class="testimonial-text">"CraftHub made booking our kids' craft birthday party incredibly smooth. The booking system is so easy — I had a confirmed venue in under 5 minutes!"</p>
+                    <div class="testimonial-author">
+                        <div class="testimonial-avatar" style="background: linear-gradient(135deg, #e94560, #c0392b);">JL</div>
+                        <div>
+                            <div class="testimonial-name">Joyce Lim</div>
+                            <div class="testimonial-role">Parent & Craft Enthusiast</div>
+                        </div>
+                    </div>
+                </div>
 
-            <div class="testimonial-card reveal reveal-delay-2">
-                <div class="testimonial-stars">
-                    <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
-                    <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
-                    <i class="fa-solid fa-star"></i>
-                </div>
-                <p class="testimonial-text">"As a cashier, the payment tracking dashboard is a lifesaver. I can see pending payments, process transactions, and generate reports all in one place."</p>
-                <div class="testimonial-author">
-                    <div class="testimonial-avatar" style="background: linear-gradient(135deg, #4ecdc4, #1a9e96);">MR</div>
-                    <div>
-                        <div class="testimonial-name">Marco Reyes</div>
-                        <div class="testimonial-role">Event Cashier</div>
+                <div class="testimonial-card reveal reveal-delay-2">
+                    <div class="testimonial-stars">
+                        <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
+                        <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
+                        <i class="fa-solid fa-star"></i>
+                    </div>
+                    <p class="testimonial-text">"As a cashier, the payment tracking dashboard is a lifesaver. I can see pending payments, process transactions, and generate reports all in one place."</p>
+                    <div class="testimonial-author">
+                        <div class="testimonial-avatar" style="background: linear-gradient(135deg, #4ecdc4, #1a9e96);">MR</div>
+                        <div>
+                            <div class="testimonial-name">Marco Reyes</div>
+                            <div class="testimonial-role">Event Cashier</div>
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            <div class="testimonial-card reveal reveal-delay-3">
-                <div class="testimonial-stars">
-                    <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
-                    <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
-                    <i class="fa-solid fa-star-half-stroke"></i>
-                </div>
-                <p class="testimonial-text">"The admin dashboard gives me full visibility into our business. Audit logs, revenue stats, and user management — everything is clean and accessible."</p>
-                <div class="testimonial-author">
-                    <div class="testimonial-avatar" style="background: linear-gradient(135deg, #f5a623, #e67e22);">AC</div>
-                    <div>
-                        <div class="testimonial-name">Ana Cruz</div>
-                        <div class="testimonial-role">Studio Owner & Admin</div>
+                <div class="testimonial-card reveal reveal-delay-3">
+                    <div class="testimonial-stars">
+                        <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
+                        <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
+                        <i class="fa-solid fa-star-half-stroke"></i>
+                    </div>
+                    <p class="testimonial-text">"The admin dashboard gives me full visibility into our business. Audit logs, revenue stats, and user management — everything is clean and accessible."</p>
+                    <div class="testimonial-author">
+                        <div class="testimonial-avatar" style="background: linear-gradient(135deg, #f5a623, #e67e22);">AC</div>
+                        <div>
+                            <div class="testimonial-name">Ana Cruz</div>
+                            <div class="testimonial-role">Studio Owner & Admin</div>
+                        </div>
                     </div>
                 </div>
-            </div>
+            <?php endif; ?>
         </div>
     </div>
 </section>

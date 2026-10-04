@@ -5,7 +5,15 @@
 // ============================================================
 $pageTitle = 'Sales & Analytics Reports';
 require_once __DIR__ . '/../includes/header.php';
-requireRole(['staff', 'cashier', 'admin']);
+
+// Analytics & Reports removed for cashier/staff role
+if (in_array($_SESSION['user_role'] ?? '', ['staff', 'cashier'])) {
+    setFlash('error', 'Access denied. Analytics & Reports are not accessible to cashier accounts.');
+    redirect(APP_URL . '/staff/dashboard.php');
+}
+
+requireRole(['admin']);
+redirect(APP_URL . '/admin/reports.php');
 ?>
 
 <?php require_once __DIR__ . '/../includes/navbar.php'; ?>

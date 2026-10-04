@@ -8,9 +8,9 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/auth.php';
 
-// Security: staff and cashier only
+// Security: admin only (reports removed for cashier/staff)
 $role = $_SESSION['user_role'] ?? '';
-if (!isset($_SESSION['user_id']) || !in_array($role, ['staff', 'cashier', 'admin'])) {
+if (!isset($_SESSION['user_id']) || $role !== 'admin') {
     http_response_code(403);
     echo json_encode(['error' => 'Unauthorized']);
     exit();

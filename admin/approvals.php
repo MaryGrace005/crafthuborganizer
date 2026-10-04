@@ -54,6 +54,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                ->execute([$idCode, $loginEmail, $hash, $tempPass, $uid]);
 
             logAudit($adminId, 'APPROVE_ACCOUNT', "Approved account #{$uid} ({$target['email']}) → {$idCode}, login: {$loginEmail}", 'users');
+
+            // Send Account Approval Email
+            require_once __DIR__ . '/../includes/mailer.php';
+            @sendAccountApprovalEmail($uid);
+
             setFlash('success', "✓ Account for {$target['name']} approved! Account ID: <strong>{$idCode}</strong>. Login Gmail: <strong>{$loginEmail}</strong>");
         } else {
             setFlash('error', 'Account not found or already processed.');

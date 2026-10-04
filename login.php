@@ -44,30 +44,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 goto end_login;
             }
 
-            // ── IP Enforcement for Customer Accounts ──────────────────────
+            // ── IP Logging for Customer Accounts ──────────────────────
             if ($user['role'] === 'customer') {
                 $clientIp = $_SERVER['HTTP_X_FORWARDED_FOR']
                     ?? $_SERVER['HTTP_CLIENT_IP']
                     ?? $_SERVER['REMOTE_ADDR']
                     ?? '0.0.0.0';
-                // Take first IP if X-Forwarded-For has multiple
                 $clientIp = trim(explode(',', $clientIp)[0]);
-
                 $storedIp = $user['ip_address'] ?? null;
 
-                if ($storedIp === null || $storedIp === '') {
-                    // First login — record IP
+                if ($storedIp !== $clientIp) {
                     try {
                         $db->prepare("UPDATE users SET ip_address = ? WHERE user_id = ?")
                            ->execute([$clientIp, $user['user_id'] ?? $user['id']]);
+                        logAudit($user['user_id'] ?? $user['id'], 'IP_UPDATE', "Login IP updated from " . ($storedIp ?: 'none') . " to {$clientIp}", 'users');
                     } catch (PDOException $e) {
-                        // Ignore duplicate IP constraint error if shared network/localhost
+                        // Ignore constraint error on shared test environments
                     }
-                } elseif ($storedIp !== $clientIp) {
-                    // IP mismatch — block login
-                    $error = 'Login blocked: Access from this device is not authorized for your account. Please contact the admin.';
-                    logAudit(0, 'IP_BLOCK', "IP mismatch for {$email}: stored={$storedIp}, attempt={$clientIp}", 'users');
-                    goto end_login;
                 }
             }
             // ─────────────────────────────────────────────────────────────

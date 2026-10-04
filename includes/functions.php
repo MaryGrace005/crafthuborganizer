@@ -184,7 +184,18 @@ function paginate(int $total, int $perPage, int $currentPage): array {
 // -----------------------------------------------
 function getActivePackages(): array {
     $db   = getDB();
-    $stmt = $db->query("SELECT package_id AS id, package_id, package_name AS name, package_name, base_price AS price, base_price, description, status FROM packages WHERE status = 'active' ORDER BY base_price ASC");
+    ensureDiscountColumns($db);
+    $stmt = $db->query("SELECT package_id AS id, package_id, package_name AS name, package_name,
+        base_price AS price, base_price, description, status,
+        COALESCE(full_payment_discount_percent,10) AS full_payment_discount_percent,
+        COALESCE(downpayment_discount_percent,5)  AS downpayment_discount_percent,
+        COALESCE(downpayment_percent,50)          AS downpayment_percent,
+        COALESCE(max_slots, 5)                    AS max_slots,
+        (SELECT COUNT(*) FROM bookings WHERE package_id = p.package_id AND status NOT IN ('Cancelled')) AS booked_count,
+        (SELECT COUNT(*) FROM bookings WHERE package_id = p.package_id AND status = 'Completed') AS completed_count,
+        (SELECT COUNT(*) FROM bookings WHERE package_id = p.package_id AND status IN ('Pending','Confirmed','Paid')) AS active_booking_count,
+        GREATEST(0, COALESCE(p.max_slots, 5) - (SELECT COUNT(*) FROM bookings WHERE package_id = p.package_id AND status IN ('Pending','Confirmed','Paid'))) AS available_slots
+        FROM packages p WHERE status = 'active' ORDER BY base_price ASC");
     return $stmt->fetchAll();
 }
 
@@ -229,6 +240,100 @@ function ensureApprovalColumns(?PDO $db = null): void {
         }
     } catch (Exception $e) {}
     $ensured = true;
+}
+
+// -----------------------------------------------
+//  Ensure Discount Columns on Packages & Bookings
+// -----------------------------------------------
+function ensureDiscountColumns(?PDO $db = null): void {
+    static $ensured = false;
+    if ($ensured) return;
+    $db = $db ?? getDB();
+
+    // Packages table columns
+    try {
+        $pCols = [
+            'full_payment_discount_percent' => "DECIMAL(5,2) NOT NULL DEFAULT 10.00 AFTER base_price",
+            'downpayment_discount_percent'  => "DECIMAL(5,2) NOT NULL DEFAULT 5.00 AFTER full_payment_discount_percent",
+            'downpayment_percent'           => "DECIMAL(5,2) NOT NULL DEFAULT 50.00 AFTER downpayment_discount_percent",
+        ];
+        foreach ($pCols as $col => $def) {
+            $chk = $db->query("SHOW COLUMNS FROM packages LIKE '{$col}'")->fetch();
+            if (!$chk) {
+                $db->exec("ALTER TABLE packages ADD COLUMN {$col} {$def}");
+            }
+        }
+        // Set defaults for existing rows if needed
+        $db->exec("UPDATE packages SET full_payment_discount_percent = 10.00 WHERE full_payment_discount_percent IS NULL OR full_payment_discount_percent = 0");
+        $db->exec("UPDATE packages SET downpayment_discount_percent = 5.00 WHERE downpayment_discount_percent IS NULL OR downpayment_discount_percent = 0");
+        $db->exec("UPDATE packages SET downpayment_percent = 50.00 WHERE downpayment_percent IS NULL OR downpayment_percent = 0");
+    } catch (Exception $e) {}
+
+    // Bookings table columns
+    try {
+        $bCols = [
+            'payment_plan'         => "ENUM('full','downpayment') NOT NULL DEFAULT 'full' AFTER event_type",
+            'original_amount'      => "DECIMAL(10,2) NULL DEFAULT NULL AFTER guest_count",
+            'discount_percent'     => "DECIMAL(5,2) NOT NULL DEFAULT 0.00 AFTER original_amount",
+            'discount_amount'      => "DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER discount_percent",
+            'downpayment_percent'  => "DECIMAL(5,2) NOT NULL DEFAULT 50.00 AFTER discount_amount",
+            'required_downpayment' => "DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER downpayment_percent",
+        ];
+        foreach ($bCols as $col => $def) {
+            $chk = $db->query("SHOW COLUMNS FROM bookings LIKE '{$col}'")->fetch();
+            if (!$chk) {
+                $db->exec("ALTER TABLE bookings ADD COLUMN {$col} {$def}");
+            }
+        }
+        // Backfill original_amount where null
+        $db->exec("UPDATE bookings SET original_amount = total_amount WHERE original_amount IS NULL OR original_amount = 0");
+    } catch (Exception $e) {}
+
+    $ensured = true;
+}
+
+// -----------------------------------------------
+//  Calculate Package Pricing with Discounts
+// -----------------------------------------------
+function calculatePackagePricing(float $basePrice, float $fullDiscountPct = 10.0, float $downDiscountPct = 5.0, float $downRequiredPct = 50.0, string $plan = 'full'): array {
+    $basePrice       = round(max(0.0, $basePrice), 2);
+    $fullDiscountPct = round(max(0.0, min(100.0, $fullDiscountPct)), 2);
+    $downDiscountPct = round(max(0.0, min(100.0, $downDiscountPct)), 2);
+    $downRequiredPct = round(max(1.0, min(100.0, $downRequiredPct ?: 50.0)), 2);
+
+    $fullDiscountAmt = round($basePrice * ($fullDiscountPct / 100.0), 2);
+    $fullPayPrice    = round(max(0.0, $basePrice - $fullDiscountAmt), 2);
+
+    $downDiscountAmt = round($basePrice * ($downDiscountPct / 100.0), 2);
+    $downTotalPrice  = round(max(0.0, $basePrice - $downDiscountAmt), 2);
+    $reqDownpayment  = round($downTotalPrice * ($downRequiredPct / 100.0), 2);
+    $downBalance     = round(max(0.0, $downTotalPrice - $reqDownpayment), 2);
+
+    $isDp = ($plan === 'downpayment');
+    $discountPercent = $isDp ? $downDiscountPct : $fullDiscountPct;
+    $discountAmount  = $isDp ? $downDiscountAmt : $fullDiscountAmt;
+    $discountedTotal = $isDp ? $downTotalPrice : $fullPayPrice;
+    $downpaymentDue  = $isDp ? $reqDownpayment : $fullPayPrice;
+    $balanceDue      = $isDp ? $downBalance : 0.0;
+
+    return [
+        'base_price'                   => $basePrice,
+        'plan'                         => $plan,
+        'discount_percent'             => $discountPercent,
+        'discount_amount'              => $discountAmount,
+        'discounted_total'             => $discountedTotal,
+        'downpayment_due'              => $downpaymentDue,
+        'balance_due'                  => $balanceDue,
+        'full_discount_percent'        => $fullDiscountPct,
+        'full_discount_amount'         => $fullDiscountAmt,
+        'full_payment_price'           => $fullPayPrice,
+        'downpayment_discount_percent' => $downDiscountPct,
+        'downpayment_discount_amount'  => $downDiscountAmt,
+        'downpayment_total_price'      => $downTotalPrice,
+        'downpayment_required_percent' => $downRequiredPct,
+        'required_downpayment_amount'  => $reqDownpayment,
+        'downpayment_balance'          => $downBalance,
+    ];
 }
 
 // -----------------------------------------------
@@ -474,5 +579,290 @@ function getCustomerPaymentDueAlerts(int $customerId, int $daysThreshold = 7): a
     }
 
     return $alerts;
+}
+
+// -----------------------------------------------
+//  Ensure Schema Updates (V4 migration)
+// -----------------------------------------------
+function ensureV4Schema(?PDO $db = null): void {
+    static $v4Done = false;
+    if ($v4Done) return;
+    $db = $db ?? getDB();
+
+    try {
+        // 1. cancellation_reason on bookings
+        $col1 = $db->query("SHOW COLUMNS FROM bookings LIKE 'cancellation_reason'")->fetch();
+        if (!$col1) {
+            $db->exec("ALTER TABLE bookings ADD COLUMN cancellation_reason TEXT NULL AFTER notes");
+        }
+    } catch (Exception $e) {}
+
+    try {
+        // Attempt engine alignment to InnoDB if needed
+        $db->exec("ALTER TABLE users ENGINE=InnoDB");
+        $db->exec("ALTER TABLE bookings ENGINE=InnoDB");
+    } catch (Exception $e) {}
+
+    try {
+        // 2. notifications table
+        $db->exec("
+            CREATE TABLE IF NOT EXISTS notifications (
+                notification_id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id         INT NOT NULL,
+                title           VARCHAR(150) NOT NULL,
+                message         TEXT NOT NULL,
+                type            VARCHAR(50) NOT NULL DEFAULT 'info',
+                link            VARCHAR(255) NULL,
+                is_read         TINYINT(1) NOT NULL DEFAULT 0,
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_user_read (user_id, is_read),
+                INDEX idx_user_created (user_id, created_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+    } catch (Exception $e) {
+        try {
+            $db->exec("
+                CREATE TABLE IF NOT EXISTS notifications (
+                    notification_id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id         INT NOT NULL,
+                    title           VARCHAR(150) NOT NULL,
+                    message         TEXT NOT NULL,
+                    type            VARCHAR(50) NOT NULL DEFAULT 'info',
+                    link            VARCHAR(255) NULL,
+                    is_read         TINYINT(1) NOT NULL DEFAULT 0,
+                    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_user_read (user_id, is_read),
+                    INDEX idx_user_created (user_id, created_at)
+                )
+            ");
+        } catch (Exception $e2) {}
+    }
+
+    try {
+        // 3. payment_submissions table
+        $db->exec("
+            CREATE TABLE IF NOT EXISTS payment_submissions (
+                submission_id    INT AUTO_INCREMENT PRIMARY KEY,
+                booking_id       INT NOT NULL,
+                customer_id      INT NOT NULL,
+                amount           DECIMAL(10,2) NOT NULL,
+                payment_method   VARCHAR(50) NOT NULL DEFAULT 'gcash',
+                reference_no     VARCHAR(100) NOT NULL,
+                proof_image      VARCHAR(500) NOT NULL,
+                notes            TEXT NULL,
+                status           ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+                rejection_reason TEXT NULL,
+                reviewed_by      INT NULL,
+                reviewed_at      TIMESTAMP NULL DEFAULT NULL,
+                payment_id       INT NULL,
+                created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_sub_booking (booking_id),
+                INDEX idx_sub_customer (customer_id),
+                INDEX idx_sub_status (status)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+    } catch (Exception $e) {
+        try {
+            $db->exec("
+                CREATE TABLE IF NOT EXISTS payment_submissions (
+                    submission_id    INT AUTO_INCREMENT PRIMARY KEY,
+                    booking_id       INT NOT NULL,
+                    customer_id      INT NOT NULL,
+                    amount           DECIMAL(10,2) NOT NULL,
+                    payment_method   VARCHAR(50) NOT NULL DEFAULT 'gcash',
+                    reference_no     VARCHAR(100) NOT NULL,
+                    proof_image      VARCHAR(500) NOT NULL,
+                    notes            TEXT NULL,
+                    status           ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+                    rejection_reason TEXT NULL,
+                    reviewed_by      INT NULL,
+                    reviewed_at      TIMESTAMP NULL DEFAULT NULL,
+                    payment_id       INT NULL,
+                    created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_sub_booking (booking_id),
+                    INDEX idx_sub_customer (customer_id),
+                    INDEX idx_sub_status (status)
+                )
+            ");
+        } catch (Exception $e2) {}
+    }
+
+    try {
+        // 4. booking_components table and price_at_booking
+        $db->exec("
+            CREATE TABLE IF NOT EXISTS booking_components (
+                booking_component_id INT AUTO_INCREMENT PRIMARY KEY,
+                booking_id           INT NOT NULL,
+                component_id         INT NOT NULL,
+                price_at_booking     DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+                created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_bc_booking (booking_id),
+                INDEX idx_bc_component (component_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+        $chkCol = $db->query("SHOW COLUMNS FROM booking_components LIKE 'price_at_booking'")->fetch();
+        if (!$chkCol) {
+            $db->exec("ALTER TABLE booking_components ADD COLUMN price_at_booking DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER component_id");
+        }
+    } catch (Exception $e) {}
+
+    try {
+        // 5. reviews table
+        $db->exec("
+            CREATE TABLE IF NOT EXISTS reviews (
+                review_id       INT AUTO_INCREMENT PRIMARY KEY,
+                booking_id      INT NOT NULL,
+                customer_id     INT NOT NULL,
+                rating          TINYINT UNSIGNED NOT NULL DEFAULT 5,
+                service_rating  TINYINT UNSIGNED NULL,
+                venue_rating    TINYINT UNSIGNED NULL,
+                food_rating     TINYINT UNSIGNED NULL,
+                review_text     TEXT NOT NULL,
+                would_recommend TINYINT(1) NOT NULL DEFAULT 1,
+                status          ENUM('published','hidden') NOT NULL DEFAULT 'published',
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_review_booking (booking_id),
+                INDEX idx_review_customer (customer_id),
+                INDEX idx_review_rating (rating)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+    } catch (Exception $e) {
+        try {
+            $db->exec("
+                CREATE TABLE IF NOT EXISTS reviews (
+                    review_id       INT AUTO_INCREMENT PRIMARY KEY,
+                    booking_id      INT NOT NULL,
+                    customer_id     INT NOT NULL,
+                    rating          TINYINT UNSIGNED NOT NULL DEFAULT 5,
+                    service_rating  TINYINT UNSIGNED NULL,
+                    venue_rating    TINYINT UNSIGNED NULL,
+                    food_rating     TINYINT UNSIGNED NULL,
+                    review_text     TEXT NOT NULL,
+                    would_recommend TINYINT(1) NOT NULL DEFAULT 1,
+                    status          ENUM('published','hidden') NOT NULL DEFAULT 'published',
+                    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_review_booking (booking_id),
+                    INDEX idx_review_customer (customer_id),
+                    INDEX idx_review_rating (rating)
+                )
+            ");
+        } catch (Exception $e2) {}
+    }
+
+    try {
+        // 6. email_logs table for transactional mail auditing
+        $db->exec("
+            CREATE TABLE IF NOT EXISTS email_logs (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                recipient_email VARCHAR(191) NOT NULL,
+                recipient_name VARCHAR(191) NULL,
+                subject VARCHAR(255) NOT NULL,
+                body_preview TEXT NULL,
+                status ENUM('sent', 'simulated', 'failed') NOT NULL DEFAULT 'sent',
+                error_message TEXT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_email_recipient (recipient_email),
+                INDEX idx_email_status (status)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+    } catch (Exception $e) {
+        try {
+            $db->exec("
+                CREATE TABLE IF NOT EXISTS email_logs (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    recipient_email VARCHAR(191) NOT NULL,
+                    recipient_name VARCHAR(191) NULL,
+                    subject VARCHAR(255) NOT NULL,
+                    body_preview TEXT NULL,
+                    status ENUM('sent', 'simulated', 'failed') NOT NULL DEFAULT 'sent',
+                    error_message TEXT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ");
+        } catch (Exception $e2) {}
+    }
+
+    $v4Done = true;
+}
+
+// Auto-run schema check
+ensureV4Schema();
+
+// -----------------------------------------------
+//  Notification Helpers
+// -----------------------------------------------
+function createNotification(int $userId, string $title, string $message, string $type = 'info', ?string $link = null): bool {
+    try {
+        $db = getDB();
+        $stmt = $db->prepare("INSERT INTO notifications (user_id, title, message, type, link) VALUES (?, ?, ?, ?, ?)");
+        return $stmt->execute([$userId, $title, $message, $type, $link]);
+    } catch (Exception $e) {
+        return false;
+    }
+}
+
+function notifyAdminsAndStaff(string $title, string $message, string $type = 'info', ?string $link = null): void {
+    try {
+        $db = getDB();
+        $recipients = $db->query("SELECT user_id FROM users WHERE role IN ('admin', 'staff', 'cashier') AND status = 'active'")->fetchAll();
+        foreach ($recipients as $r) {
+            createNotification((int)$r['user_id'], $title, $message, $type, $link);
+        }
+    } catch (Exception $e) {}
+}
+
+function getUserUnreadNotificationsCount(int $userId): int {
+    if ($userId <= 0) return 0;
+    try {
+        $db = getDB();
+        $stmt = $db->prepare("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0");
+        $stmt->execute([$userId]);
+        return (int)$stmt->fetchColumn();
+    } catch (Exception $e) {
+        return 0;
+    }
+}
+
+function getUserNotifications(int $userId, int $limit = 10): array {
+    if ($userId <= 0) return [];
+    try {
+        $db = getDB();
+        $stmt = $db->prepare("SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT " . (int)$limit);
+        $stmt->execute([$userId]);
+        return $stmt->fetchAll();
+    } catch (Exception $e) {
+        return [];
+    }
+}
+
+function markNotificationsRead(int $userId): bool {
+    if ($userId <= 0) return false;
+    try {
+        $db = getDB();
+        $stmt = $db->prepare("UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0");
+        return $stmt->execute([$userId]);
+    } catch (Exception $e) {
+        return false;
+    }
+}
+
+// -----------------------------------------------
+//  Booking Components (Add-ons) Helpers
+// -----------------------------------------------
+function getBookingSelectedComponents(int $bookingId): array {
+    try {
+        $db = getDB();
+        $stmt = $db->prepare("
+            SELECT bc.*, pc.name, pc.category, pc.description, bc.price_at_booking AS price
+            FROM booking_components bc
+            JOIN package_components pc ON bc.component_id = pc.component_id
+            WHERE bc.booking_id = ?
+            ORDER BY pc.category, pc.name
+        ");
+        $stmt->execute([$bookingId]);
+        return $stmt->fetchAll();
+    } catch (Exception $e) {
+        return [];
+    }
 }
 

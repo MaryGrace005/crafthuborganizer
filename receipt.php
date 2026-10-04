@@ -24,7 +24,10 @@ if (!$paymentId) {
 $stmt = $db->prepare("
     SELECT py.*, py.payment_id AS id,
            b.booking_reference, b.total_amount, b.event_date,
-           p.package_name,
+           COALESCE(b.payment_plan, 'full') AS payment_plan,
+           COALESCE(b.discount_amount, 0) AS discount_amount,
+           COALESCE(b.downpayment_amount, 0) AS downpayment_amount,
+           p.package_name, p.base_price,
            c.name AS customer_name, c.email AS customer_email, c.id_code AS customer_id_code, c.contact_no AS customer_phone, c.user_id AS customer_user_id,
            u.name AS cashier_name,
            b.status AS booking_status,
@@ -332,10 +335,36 @@ $isCancelled  = strtolower($payment['booking_status'] ?? '') === 'cancelled';
                 </tr>
             </thead>
             <tbody>
+                <?php
+                $discAmt = (float)($payment['discount_amount'] ?? 0);
+                $basePkgPrice = (float)($payment['base_price'] ?? 0);
+                $isDpPlan = ($payment['payment_plan'] ?? 'full') === 'downpayment';
+                ?>
+                <?php if ($discAmt > 0): ?>
+                <tr>
+                    <td style="color:var(--text-secondary);">Original Package Price</td>
+                    <td style="text-align:right;font-weight:600;color:var(--text-muted);text-decoration:line-through;">
+                        <?= formatCurrency($basePkgPrice > 0 ? $basePkgPrice : ($totalAmount + $discAmt)) ?>
+                    </td>
+                </tr>
+                <tr style="background:rgba(46,204,113,0.08);">
+                    <td style="color:#2ecc71;font-weight:600;">
+                        <i class="fa-solid fa-tag"></i> Discount Applied (<?= $isDpPlan ? 'Downpayment Plan' : 'Full Payment Plan' ?>)
+                    </td>
+                    <td style="text-align:right;font-weight:700;color:#2ecc71;">
+                        -<?= formatCurrency($discAmt) ?>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="color:var(--text-secondary);font-weight:700;">Total Amount (After Discount)</td>
+                    <td style="text-align:right;font-weight:700;"><?= formatCurrency($totalAmount) ?></td>
+                </tr>
+                <?php else: ?>
                 <tr>
                     <td style="color:var(--text-secondary);">Total Package Amount</td>
                     <td style="text-align:right;font-weight:700;"><?= formatCurrency($totalAmount) ?></td>
                 </tr>
+                <?php endif; ?>
                 <tr style="background:rgba(39,174,96,0.08);">
                     <td style="color:#27ae60;font-weight:700;">Amount Paid Received</td>
                     <td style="text-align:right;font-weight:800;color:#27ae60;font-size:1.05rem;"><?= formatCurrency($payment['amount_paid']) ?></td>

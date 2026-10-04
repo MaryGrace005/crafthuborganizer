@@ -18,15 +18,21 @@ $preDate    = preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['date'] ?? '') ? $_GET['
 
 
 // Load packages and venues for form
-$packages = $db->query("SELECT package_id AS id, package_id, package_name AS name, package_name, base_price AS price, base_price, event_type, description, status FROM packages WHERE status = 'active' ORDER BY package_name")->fetchAll();
+$packages = getActivePackages();
 $venues   = $db->query("SELECT venue_id AS id, venue_id, venue_name AS name, venue_name, capacity, location, availability_status FROM venues WHERE availability_status = 'available' ORDER BY venue_name")->fetchAll();
 
 // Build JS maps
 $pkgPriceMap      = [];
+$pkgDiscountMap   = [];
 $pkgInclusionsMap = [];
 
 foreach ($packages as $p) {
-    $pkgPriceMap[$p['id']] = $p['price'];
+    $pkgPriceMap[$p['id']]    = $p['price'];
+    $pkgDiscountMap[$p['id']] = [
+        'full_payment_discount_percent' => (float)($p['full_payment_discount_percent'] ?? 10),
+        'downpayment_discount_percent'  => (float)($p['downpayment_discount_percent']  ?? 5),
+        'downpayment_percent'           => (float)($p['downpayment_percent']            ?? 50),
+    ];
     $cStmt = $db->prepare("SELECT category, name, description FROM package_components WHERE package_id = ? ORDER BY category, name");
     $cStmt->execute([$p['id']]);
     $comps = $cStmt->fetchAll();
@@ -70,6 +76,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($eventDate < date('Y-m-d', strtotime('+1 day'))) $errors[] = 'Event date must be at least tomorrow.';
     if ($numGuests < 1)     $errors[] = 'Number of guests must be at least 1.';
 
+    // ── Package slot availability check (server-side — cannot be bypassed) ──
+    if ($pkgId && empty($errors)) {
+        $slotStmt = $db->prepare("
+            SELECT COALESCE(max_slots, 5) AS max_slots,
+                   (SELECT COUNT(*) FROM bookings WHERE package_id = ? AND status IN ('Pending','Confirmed','Paid')) AS active_bookings
+            FROM packages WHERE package_id = ? AND status = 'active'
+        ");
+        $slotStmt->execute([$pkgId, $pkgId]);
+        $slotRow = $slotStmt->fetch();
+        if (!$slotRow) {
+            $errors[] = 'Selected package is no longer available.';
+        } elseif ((int)$slotRow['active_bookings'] >= (int)$slotRow['max_slots']) {
+            $errors[] = 'Sorry, this package is fully booked. Please choose a different package.';
+        }
+    }
+
     // ── Venue availability check (server-side — cannot be bypassed) ──
     if (empty($errors) && $venueId !== null) {
         if (!isVenueDateAvailable($venueId, $eventDate)) {
@@ -82,13 +104,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    $paymentPlan = in_array($_POST['payment_plan'] ?? '', ['full','downpayment']) ? $_POST['payment_plan'] : 'full';
+
     if (empty($errors)) {
-        $pkgStmt = $db->prepare("SELECT base_price, event_type FROM packages WHERE package_id = ?");
+        $pkgStmt = $db->prepare("SELECT base_price, event_type,
+            COALESCE(full_payment_discount_percent,10) AS full_payment_discount_percent,
+            COALESCE(downpayment_discount_percent,5)  AS downpayment_discount_percent,
+            COALESCE(downpayment_percent,50)          AS downpayment_percent
+            FROM packages WHERE package_id = ?");
         $pkgStmt->execute([$pkgId]);
         $pkg = $pkgStmt->fetch();
 
-        $total     = (float)($pkg['base_price'] ?? 0);
-        $eventType = $pkg['event_type'] ?? 'Wedding';
+        $pricing   = calculatePackagePricing(
+            (float)$pkg['base_price'],
+            (float)$pkg['full_payment_discount_percent'],
+            (float)$pkg['downpayment_discount_percent'],
+            (float)$pkg['downpayment_percent'],
+            $paymentPlan
+        );
+        $total      = $pricing['discounted_total'];
+        $downAmt    = $pricing['downpayment_due'];
+        $eventType  = $pkg['event_type'] ?? 'Wedding';
 
         $ref    = generateBookingRef();
         $userId = $user['user_id'] ?? $user['id'];
@@ -96,15 +132,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $dueDate = date('Y-m-d', max(strtotime('+1 day'), strtotime('-7 days', strtotime($eventDate))));
 
         try {
+            // Ensure bookings table has discount/payment_plan columns
+            try { $db->exec("ALTER TABLE bookings ADD COLUMN payment_plan VARCHAR(20) NOT NULL DEFAULT 'full'"); } catch(PDOException $e) {}
+            try { $db->exec("ALTER TABLE bookings ADD COLUMN discount_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00"); } catch(PDOException $e) {}
+            try { $db->exec("ALTER TABLE bookings ADD COLUMN downpayment_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00"); } catch(PDOException $e) {}
             $ins = $db->prepare("
                 INSERT INTO bookings
-                    (booking_reference, customer_id, package_id, venue_id, event_date, payment_due_date, event_time, event_type, guest_count, total_amount, status, notes)
+                    (booking_reference, customer_id, package_id, venue_id, event_date, payment_due_date, event_time, event_type, guest_count, total_amount, payment_plan, discount_amount, downpayment_amount, status, notes)
                 VALUES
-                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?)
+                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?)
             ");
             $ins->execute([
                 $ref, $userId, $pkgId, $venueId,
-                $eventDate, $dueDate, $eventTime, $eventType, $numGuests, $total, $notes
+                $eventDate, $dueDate, $eventTime, $eventType, $numGuests,
+                $total, $paymentPlan, $pricing['discount_amount'], $downAmt,
+                $notes
             ]);
         } catch (PDOException $e) {
             // Catch the DB-level trigger signal (SQLSTATE 45000)
@@ -128,6 +170,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 <script>
     window.packagePrices     = <?= json_encode($pkgPriceMap) ?>;
+    window.packageDiscounts  = <?= json_encode($pkgDiscountMap) ?>;
     window.packageInclusions = <?= json_encode($pkgInclusionsMap) ?>;
     window.venueBookedDates  = <?= json_encode($venueBookedDatesMap) ?>;
     window.appUrl            = '<?= APP_URL ?>';
@@ -459,10 +502,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <label class="form-label" for="package_id">Select Package <span style="color:var(--accent-red);">*</span></label>
                 <select id="package_id" name="package_id" class="form-control" required onchange="updateBookingSummary()">
                     <option value="">-- Choose a package --</option>
-                    <?php foreach ($packages as $p): ?>
+                    <?php foreach ($packages as $p):
+                        $pDiscPct    = (float)($p['full_payment_discount_percent'] ?? 10);
+                        $discHint    = $pDiscPct > 0 ? ' · Up to ' . rtrim(rtrim(number_format($pDiscPct, 2), '0'), '.') . '% off' : '';
+                        $pAvail      = (int)($p['available_slots'] ?? max(0, ($p['max_slots'] ?? 5)));
+                        $pIsFull     = $pAvail <= 0;
+                        $slotHint    = $pIsFull ? ' [FULLY BOOKED]' : " [{$pAvail} slot" . ($pAvail === 1 ? '' : 's') . " left]";
+                    ?>
                         <option value="<?= $p['id'] ?>"
-                                <?= ($selectedPackage && $selectedPackage['id'] == $p['id']) || ($_POST['package_id'] ?? '') == $p['id'] ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($p['name']) ?> — <?= formatCurrency($p['price']) ?>
+                                <?= ($selectedPackage && $selectedPackage['id'] == $p['id']) || ($_POST['package_id'] ?? '') == $p['id'] ? 'selected' : '' ?>
+                                <?= $pIsFull ? 'disabled' : '' ?>>
+                            <?= htmlspecialchars($p['name']) ?> — <?= formatCurrency($p['price']) ?><?= $discHint ?><?= $slotHint ?>
                         </option>
                     <?php endforeach; ?>
                 </select>
@@ -551,9 +601,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
 
             <div class="form-group">
-                <label class="form-label" for="notes">Special Notes <span style="color:var(--text-muted)">(optional)</span></label>
+                <label class="form-label">Special Notes <span style="color:var(--text-muted)">(optional)</span></label>
                 <textarea id="notes" name="notes" class="form-control" rows="3"
                           placeholder="Any special requests or details..."><?= htmlspecialchars($_POST['notes'] ?? '') ?></textarea>
+            </div>
+
+            <!-- Payment Plan -->
+            <div style="background:rgba(245,166,35,0.07);border:1px solid rgba(245,166,35,0.3);border-radius:12px;padding:14px 16px;margin-bottom:16px;">
+                <div style="font-size:0.78rem;font-weight:800;color:var(--accent-gold);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px;"><i class="fa-solid fa-tag"></i> Payment Plan</div>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                    <label id="plan-full-label" style="flex:1;min-width:140px;cursor:pointer;border:2px solid rgba(245,166,35,0.5);border-radius:10px;padding:12px 14px;transition:all 0.2s;background:rgba(245,166,35,0.1);">
+                        <input type="radio" name="payment_plan" id="plan_full" value="full" checked style="margin-right:6px;">
+                        <strong>Full Payment</strong>
+                        <div id="full-badge" style="font-size:0.75rem;color:var(--accent-gold);margin-top:3px;">Save <span id="full-pct">10</span>%</div>
+                    </label>
+                    <label id="plan-dp-label" style="flex:1;min-width:140px;cursor:pointer;border:2px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px 14px;transition:all 0.2s;">
+                        <input type="radio" name="payment_plan" id="plan_dp" value="downpayment" style="margin-right:6px;">
+                        <strong>Downpayment</strong>
+                        <div id="dp-badge" style="font-size:0.75rem;color:var(--text-muted);margin-top:3px;">Save <span id="dp-pct">5</span>% &bull; Pay <span id="dp-percent-lbl">50</span>% now</div>
+                    </label>
+                </div>
             </div>
 
             <button type="submit" id="submit-btn" class="btn btn-primary btn-block btn-lg" disabled>
@@ -571,13 +638,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <div class="card-header">
                 <h2 class="card-title"><i class="fa-solid fa-receipt"></i> Booking Summary</h2>
             </div>
-            <div style="text-align:center;padding:16px 0 10px;">
-                <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:4px;">Estimated Total</div>
-                <div id="total_display" style="font-family:'Outfit',sans-serif;font-size:2.4rem;font-weight:800;color:var(--accent-gold);">
-                    ₱ 0.00
+
+            <!-- Pricing Breakdown -->
+            <div style="padding:14px 16px 0;">
+                <!-- Original Price row -->
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:0.88rem;color:var(--text-secondary);">
+                    <span>Original Price</span>
+                    <span id="sum_original">₱ 0.00</span>
                 </div>
+                <!-- Discount row -->
+                <div id="sum_discount_row" style="display:none;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:0.88rem;color:#4ecdc4;">
+                    <span><i class="fa-solid fa-tag" style="margin-right:4px;"></i>Discount (<span id="sum_discount_pct">0</span>%)</span>
+                    <span style="color:#4ecdc4;">−₱ <span id="sum_discount_amt">0.00</span></span>
+                </div>
+                <hr style="border:none;border-top:1px solid var(--border-color);margin:8px 0;">
+            </div>
+
+            <div style="text-align:center;padding:10px 16px 4px;">
+                <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:2px;">Total Amount</div>
+                <div id="total_display" style="font-family:'Outfit',sans-serif;font-size:2.2rem;font-weight:800;color:var(--accent-gold);">₱ 0.00</div>
                 <input type="hidden" id="total_amount" name="total_amount" value="0">
-                <div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px;">Base package price</div>
+            </div>
+
+            <!-- Due Today (downpayment) -->
+            <div id="sum_due_today_block" style="display:none;margin:8px 16px;padding:10px 14px;background:rgba(245,166,35,0.1);border-radius:10px;border:1px solid rgba(245,166,35,0.3);">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <span style="font-size:0.82rem;color:var(--accent-gold);font-weight:700;"><i class="fa-solid fa-clock"></i> Due Today (Downpayment)</span>
+                    <span id="sum_due_today" style="font-size:1rem;font-weight:800;color:var(--accent-gold);">₱ 0.00</span>
+                </div>
+                <div style="font-size:0.72rem;color:var(--text-muted);margin-top:4px;">Remaining balance due on or before the event.</div>
             </div>
 
             <!-- Inclusions Box -->
@@ -772,34 +861,103 @@ function scBookedSlotClick(dateStr) {
 }
 
 // ── Package Summary ────────────────────────────────────────
+function fmt(n) {
+    return '₱ ' + parseFloat(n || 0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function fmtNum(n) {
+    return parseFloat(n || 0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+
 function updateBookingSummary() {
     var pkgId        = document.getElementById('package_id').value;
-    var totalDisplay = document.getElementById('total_display');
-    var incBox       = document.getElementById('inclusions_box');
-    var incList      = document.getElementById('inclusions_list');
+    var planFull     = document.getElementById('plan_full');
+    var plan         = (planFull && planFull.checked) ? 'full' : 'downpayment';
 
-    var price = (window.packagePrices && window.packagePrices[pkgId]) ? window.packagePrices[pkgId] : 0;
-    totalDisplay.innerText = '₱ ' + parseFloat(price).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    var basePrice    = (window.packagePrices && window.packagePrices[pkgId]) ? parseFloat(window.packagePrices[pkgId]) : 0;
+    var discounts    = (window.packageDiscounts && window.packageDiscounts[pkgId]) ? window.packageDiscounts[pkgId] : {full_payment_discount_percent:10, downpayment_discount_percent:5, downpayment_percent:50};
 
-    if (pkgId && window.packageInclusions && window.packageInclusions[pkgId] && window.packageInclusions[pkgId].length > 0) {
-        var items = window.packageInclusions[pkgId];
-        var html  = '';
-        items.forEach(function(item) {
-            html += '<li style="display:flex;align-items:flex-start;gap:6px;">';
-            html += '<i class="fa-solid fa-check" style="color:var(--accent-teal);margin-top:3px;font-size:0.75rem;"></i>';
-            html += '<div><strong>' + escapeHtml(item.name) + '</strong>';
-            if (item.description) {
-                html += ' <span style="color:var(--text-muted);font-size:0.75rem;">(' + escapeHtml(item.description) + ')</span>';
-            }
-            html += '</div></li>';
-        });
-        incList.innerHTML = html;
-        incBox.style.display = 'block';
-    } else if (pkgId) {
-        incList.innerHTML = '<li style="color:var(--text-muted);font-style:italic;">Standard craft package inclusions.</li>';
-        incBox.style.display = 'block';
+    var fullPct      = parseFloat(discounts.full_payment_discount_percent || 10);
+    var dpPct        = parseFloat(discounts.downpayment_discount_percent  || 5);
+    var dpReqPct     = parseFloat(discounts.downpayment_percent           || 50);
+
+    // Update plan badge labels
+    var fpctEl = document.getElementById('full-pct');
+    var dpctEl = document.getElementById('dp-pct');
+    var dpplEl = document.getElementById('dp-percent-lbl');
+    if (fpctEl) fpctEl.textContent = fullPct;
+    if (dpctEl) dpctEl.textContent = dpPct;
+    if (dpplEl) dpplEl.textContent = dpReqPct;
+
+    // Update plan label styles
+    var planFullLabel = document.getElementById('plan-full-label');
+    var planDpLabel   = document.getElementById('plan-dp-label');
+    if (plan === 'full') {
+        if (planFullLabel) { planFullLabel.style.border='2px solid rgba(245,166,35,0.8)'; planFullLabel.style.background='rgba(245,166,35,0.12)'; }
+        if (planDpLabel)   { planDpLabel.style.border='2px solid rgba(255,255,255,0.08)'; planDpLabel.style.background=''; }
     } else {
-        incBox.style.display = 'none';
+        if (planDpLabel)   { planDpLabel.style.border='2px solid rgba(245,166,35,0.8)'; planDpLabel.style.background='rgba(245,166,35,0.12)'; }
+        if (planFullLabel) { planFullLabel.style.border='2px solid rgba(255,255,255,0.08)'; planFullLabel.style.background=''; }
+    }
+
+    var discPct      = (plan === 'full') ? fullPct : dpPct;
+    var discAmt      = basePrice * discPct / 100;
+    var discTotal    = basePrice - discAmt;
+    var dueToday     = (plan === 'downpayment') ? (discTotal * dpReqPct / 100) : discTotal;
+
+    // Update DOM
+    var sumOrigEl  = document.getElementById('sum_original');
+    var sumDrRow   = document.getElementById('sum_discount_row');
+    var sumDrPct   = document.getElementById('sum_discount_pct');
+    var sumDrAmt   = document.getElementById('sum_discount_amt');
+    var totalDisp  = document.getElementById('total_display');
+    var totalHid   = document.getElementById('total_amount');
+    var dueTodayBl = document.getElementById('sum_due_today_block');
+    var dueTodayEl = document.getElementById('sum_due_today');
+
+    if (sumOrigEl) sumOrigEl.textContent = basePrice > 0 ? fmt(basePrice) : '₱ 0.00';
+
+    if (basePrice > 0 && discPct > 0) {
+        if (sumDrRow) { sumDrRow.style.display = 'flex'; }
+        if (sumDrPct) sumDrPct.textContent = discPct;
+        if (sumDrAmt) sumDrAmt.textContent  = fmtNum(discAmt);
+    } else {
+        if (sumDrRow) sumDrRow.style.display = 'none';
+    }
+
+    if (totalDisp) totalDisp.textContent = basePrice > 0 ? fmt(discTotal) : '₱ 0.00';
+    if (totalHid)  totalHid.value = discTotal.toFixed(2);
+
+    if (plan === 'downpayment' && basePrice > 0) {
+        if (dueTodayBl) dueTodayBl.style.display = 'block';
+        if (dueTodayEl) dueTodayEl.textContent = fmt(dueToday);
+    } else {
+        if (dueTodayBl) dueTodayBl.style.display = 'none';
+    }
+
+    // Inclusions
+    var incBox  = document.getElementById('inclusions_box');
+    var incList = document.getElementById('inclusions_list');
+    if (incBox && incList) {
+        if (pkgId && window.packageInclusions && window.packageInclusions[pkgId] && window.packageInclusions[pkgId].length > 0) {
+            var items = window.packageInclusions[pkgId];
+            var html  = '';
+            items.forEach(function(item) {
+                html += '<li style="display:flex;align-items:flex-start;gap:6px;">';
+                html += '<i class="fa-solid fa-check" style="color:var(--accent-teal);margin-top:3px;font-size:0.75rem;"></i>';
+                html += '<div><strong>' + escapeHtml(item.name) + '</strong>';
+                if (item.description) {
+                    html += ' <span style="color:var(--text-muted);font-size:0.75rem;">(' + escapeHtml(item.description) + ')</span>';
+                }
+                html += '</div></li>';
+            });
+            incList.innerHTML = html;
+            incBox.style.display = 'block';
+        } else if (pkgId) {
+            incList.innerHTML = '<li style="color:var(--text-muted);font-style:italic;">Standard craft package inclusions.</li>';
+            incBox.style.display = 'block';
+        } else {
+            incBox.style.display = 'none';
+        }
     }
 }
 
@@ -948,6 +1106,12 @@ document.addEventListener('DOMContentLoaded', function(){
 
     var venueId = document.getElementById('venue_id').value;
     if (venueId) onVenueChange();
+
+    // Payment plan radio listeners
+    ['plan_full','plan_dp'].forEach(function(id){
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('change', updateBookingSummary);
+    });
 });
 </script>
 <?php endif; ?>

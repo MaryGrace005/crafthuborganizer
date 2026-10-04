@@ -73,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (empty($errors)) {
             $userId = $user['user_id'] ?? $user['id'];
             $hash = password_hash($new, PASSWORD_DEFAULT);
-            $stmt = $db->prepare("UPDATE users SET password = ? WHERE user_id = ?");
+            $stmt = $db->prepare("UPDATE users SET password = ?, temp_password = NULL WHERE user_id = ?");
             $stmt->execute([$hash, $userId]);
             logAudit($userId, 'CHANGE_PASSWORD', 'Password changed successfully', 'users');
             setFlash('success', 'Password changed successfully!');

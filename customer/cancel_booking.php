@@ -29,10 +29,15 @@ if (strtolower($booking['status']) !== 'pending') {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $reason = sanitize($_POST['reason'] ?? '');
-    $upd    = $db->prepare("UPDATE bookings SET status = 'Cancelled' WHERE booking_id = ?");
-    $upd->execute([$bookingId]);
-    logAudit($userId, 'CANCEL_BOOKING', "Cancelled booking #{$bookingId}", 'bookings');
+    $reason = sanitize($_POST['reason'] ?? 'Cancelled by customer');
+    $upd    = $db->prepare("UPDATE bookings SET status = 'Cancelled', cancellation_reason = ? WHERE booking_id = ?");
+    $upd->execute([$reason ?: 'Cancelled by customer', $bookingId]);
+    logAudit($userId, 'CANCEL_BOOKING', "Customer cancelled booking #{$bookingId}. Reason: {$reason}", 'bookings');
+
+    // Notify staff & admin
+    $ref = getBookingRef($booking);
+    notifyAdminsAndStaff("Booking Cancelled", "Customer cancelled booking {$ref}. Reason: " . ($reason ?: 'No reason specified'), 'warning', APP_URL . '/staff/bookings.php');
+
     setFlash('success', 'Booking #' . $bookingId . ' has been cancelled.');
     redirect(APP_URL . '/customer/bookings.php');
 }

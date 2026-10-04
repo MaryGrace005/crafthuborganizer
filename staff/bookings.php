@@ -36,9 +36,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $timeFormatted = date('M d, Y g:i A', strtotime($now));
             logAudit($cashierId, 'APPROVE_BOOKING', "Cashier approved booking #{$id} ({$ref}) for {$booking['customer_name']} on {$timeFormatted}", 'bookings');
+            
+            // In-App Notification to Customer
+            createNotification(
+                (int)$booking['customer_id'],
+                "Booking Confirmed!",
+                "Great news! Your booking #{$ref} for {$booking['package_name']} has been approved. You can now view your Billing Statement / Invoice.",
+                "success",
+                APP_URL . "/invoice.php?id={$id}"
+            );
+
+            // Send Email Notification
+            require_once __DIR__ . '/../includes/mailer.php';
+            @sendBookingConfirmationEmail($id);
+
             setFlash('success', "✓ Booking <strong>{$ref}</strong> approved on <strong>{$timeFormatted}</strong>! You can now collect payment.");
             redirect(APP_URL . '/staff/bookings.php');
         }
+    }
+
+    if ($action === 'complete' && $id > 0) {
+        $chk = $db->prepare("SELECT b.*, u.name AS customer_name, p.package_name FROM bookings b JOIN users u ON b.customer_id = u.user_id JOIN packages p ON b.package_id = p.package_id WHERE b.booking_id = ?");
+        $chk->execute([$id]);
+        $booking = $chk->fetch();
+
+        if ($booking && in_array($booking['status'], ['Confirmed', 'Paid'])) {
+            $ref = getBookingRef($booking);
+            $stmt = $db->prepare("UPDATE bookings SET status = 'Completed' WHERE booking_id = ?");
+            $stmt->execute([$id]);
+
+            logAudit($cashierId, 'COMPLETE_BOOKING', "Marked booking #{$id} ({$ref}) as Completed", 'bookings');
+
+            createNotification(
+                (int)$booking['customer_id'],
+                "Event Completed 🎉",
+                "Your event for booking #{$ref} ({$booking['package_name']}) has been marked as Completed. Thank you for celebrating with CraftHub Organizer!",
+                "info",
+                APP_URL . "/customer/bookings.php"
+            );
+
+            setFlash('success', "Booking <strong>{$ref}</strong> marked as <strong>Completed</strong>! Event successfully finished.");
+        } else {
+            setFlash('error', 'Booking cannot be marked as completed.');
+        }
+        redirect(APP_URL . '/staff/bookings.php');
     }
 
     if ($action === 'cancel' && $id > 0) {
@@ -49,10 +90,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($booking) {
             $ref = getBookingRef($booking);
             $reason = sanitize($_POST['cancel_reason'] ?? 'Cancelled by Cashier');
-            $stmt = $db->prepare("UPDATE bookings SET status = 'Cancelled' WHERE booking_id = ?");
-            $stmt->execute([$id]);
+            $stmt = $db->prepare("UPDATE bookings SET status = 'Cancelled', cancellation_reason = ? WHERE booking_id = ?");
+            $stmt->execute([$reason, $id]);
 
             logAudit($cashierId, 'CANCEL_BOOKING', "Cashier cancelled booking #{$id} ({$ref}). Reason: {$reason}", 'bookings');
+
+            createNotification(
+                (int)$booking['customer_id'],
+                "Booking Cancelled",
+                "Your booking #{$ref} has been cancelled by the organizer. Reason: {$reason}",
+                "danger",
+                APP_URL . "/customer/bookings.php"
+            );
+
             setFlash('info', "Booking <strong>{$ref}</strong> has been cancelled.");
         } else {
             setFlash('error', 'Booking not found.');
@@ -320,6 +370,18 @@ $bookings = $stmt->fetchAll();
                             <span class="cur">₱</span>
                             <span class="amt"><?= number_format($realTotal, 0, '.', ',') ?></span>
                         </div>
+                        <?php if (!empty($b['payment_plan'])): ?>
+                            <div style="margin-top:4px;">
+                                <span class="badge" style="font-size:0.68rem;padding:2px 6px;background:<?= $b['payment_plan'] === 'full' ? 'rgba(46,204,113,0.15)' : 'rgba(78,205,196,0.15)' ?>;color:<?= $b['payment_plan'] === 'full' ? '#2ecc71' : 'var(--accent-teal)' ?>;border:1px solid <?= $b['payment_plan'] === 'full' ? 'rgba(46,204,113,0.35)' : 'rgba(78,205,196,0.35)' ?>;font-weight:600;">
+                                    <?= $b['payment_plan'] === 'full' ? 'Full Payment' : 'Downpayment' ?>
+                                </span>
+                            </div>
+                        <?php endif; ?>
+                        <?php if ((float)($b['discount_amount'] ?? 0) > 0): ?>
+                            <div style="font-size:0.7rem;color:#2ecc71;margin-top:2px;">
+                                <i class="fa-solid fa-tag"></i> -<?= formatCurrency($b['discount_amount']) ?>
+                            </div>
+                        <?php endif; ?>
                     </td>
                     <td>
                         <?php if ($isPending): ?>
@@ -332,6 +394,11 @@ $bookings = $stmt->fetchAll();
                                 <div style="font-size:0.72rem;color:var(--text-muted);margin-top:4px;display:flex;align-items:center;gap:4px;" title="Approved on <?= date('M d, Y g:i A', strtotime($b['approved_at'])) ?>">
                                     <i class="fa-solid fa-circle-check" style="color:#27ae60;font-size:0.75rem;"></i>
                                     <span>Approved: <strong style="color:var(--text-secondary);"><?= date('M d, Y g:i A', strtotime($b['approved_at'])) ?></strong></span>
+                                </div>
+                            <?php endif; ?>
+                            <?php if (strtolower($b['status']) === 'cancelled' && !empty($b['cancellation_reason'])): ?>
+                                <div style="font-size:0.72rem;color:#e94560;margin-top:4px;max-width:180px;white-space:normal;line-height:1.3;" title="<?= htmlspecialchars($b['cancellation_reason']) ?>">
+                                    <i class="fa-solid fa-info-circle"></i> <?= htmlspecialchars(mb_strimwidth($b['cancellation_reason'], 0, 45, '...')) ?>
                                 </div>
                             <?php endif; ?>
                         <?php endif; ?>
@@ -362,10 +429,23 @@ $bookings = $stmt->fetchAll();
                                     <i class="fa-solid fa-xmark"></i>
                                 </button>
                             <?php else: ?>
+                                <!-- Invoice / Statement of Account -->
+                                <a href="<?= APP_URL ?>/invoice.php?id=<?= $b['id'] ?>" target="_blank" class="btn btn-secondary btn-sm" title="Statement of Account / Invoice" style="white-space:nowrap;color:var(--accent-teal);border-color:rgba(78,205,196,0.3);">
+                                    <i class="fa-solid fa-file-invoice"></i> SOA
+                                </a>
                                 <!-- Confirmed / Paid Actions -->
                                 <a href="<?= APP_URL ?>/staff/bills.php?search=<?= urlencode($ref) ?>" class="btn btn-primary btn-sm" title="View Bill &amp; Collect Payment" style="white-space:nowrap;">
                                     <i class="fa-solid fa-file-invoice-dollar"></i> Bill
                                 </a>
+                                <?php if (in_array($b['status'], ['Confirmed', 'Paid'])): ?>
+                                    <form method="POST" style="display:inline;margin:0;" onsubmit="return confirm('Mark event for booking <?= htmlspecialchars(addslashes($ref)) ?> as Completed?');">
+                                        <input type="hidden" name="action" value="complete">
+                                        <input type="hidden" name="id" value="<?= $b['id'] ?>">
+                                        <button type="submit" class="btn btn-success btn-sm" title="Mark Event Completed" style="background:#27ae60;border-color:#27ae60;white-space:nowrap;">
+                                            <i class="fa-solid fa-flag-checkered"></i> Done
+                                        </button>
+                                    </form>
+                                <?php endif; ?>
                                 <a href="<?= APP_URL ?>/booking_images.php?booking_id=<?= $b['id'] ?>" class="btn btn-secondary btn-sm" title="View &amp; Upload Event Photos">
                                     <i class="fa-solid fa-camera"></i>
                                 </a>

@@ -21,13 +21,19 @@ requireRole(['admin']);
             <i class="fa-solid fa-chart-line"></i> Real-time Analytics &amp; Reports
         </div>
         <h1 style="font-family:'Outfit',sans-serif;font-size:1.9rem;font-weight:800;margin-bottom:4px;">Business Performance Dashboard</h1>
-        <p style="color:var(--text-secondary);font-size:0.92rem;">Interactive graphic data, revenue analytics, package breakdown, and automatic polling.</p>
+        <p style="color:var(--text-secondary);font-size:0.92rem;">Clean performance overview tracking revenue growth and booking volume over time.</p>
     </div>
-    <div style="display:flex;align-items:center;gap:12px;flex-shrink:0;">
+    <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;flex-wrap:wrap;">
         <span id="livePulse" style="display:inline-flex;align-items:center;gap:6px;background:rgba(39,174,96,0.15);border:1px solid rgba(39,174,96,0.35);color:#27ae60;padding:6px 14px;border-radius:20px;font-size:0.8rem;font-weight:700;">
             <span style="width:8px;height:8px;border-radius:50%;background:#27ae60;box-shadow:0 0 8px #27ae60;animation:pulse 1.5s infinite;"></span> LIVE
         </span>
-        <button class="btn btn-secondary" onclick="window.print()" style="height:42px;">
+        <a href="<?= APP_URL ?>/admin/export_reports.php?type=bookings" class="btn btn-secondary" style="height:42px;display:inline-flex;align-items:center;gap:6px;" title="Export all bookings as CSV spreadsheet">
+            <i class="fa-solid fa-file-excel"></i> Export Bookings
+        </a>
+        <a href="<?= APP_URL ?>/admin/export_reports.php?type=revenue" class="btn btn-secondary" style="height:42px;display:inline-flex;align-items:center;gap:6px;" title="Export all revenue & payments as CSV spreadsheet">
+            <i class="fa-solid fa-file-invoice-dollar"></i> Export Revenue
+        </a>
+        <button class="btn btn-primary" onclick="window.print()" style="height:42px;display:inline-flex;align-items:center;gap:6px;">
             <i class="fa-solid fa-print"></i> Print Report
         </button>
     </div>
@@ -80,6 +86,11 @@ requireRole(['admin']);
     display: flex;
     align-items: center;
     gap: 10px;
+}
+@media (max-width: 900px) {
+    .charts-grid-2 {
+        grid-template-columns: 1fr !important;
+    }
 }
 </style>
 
@@ -153,13 +164,13 @@ requireRole(['admin']);
     </div>
 </div>
 
-<!-- Charts Row 1: Line & Bar -->
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;">
+<!-- Charts: 2 Core Business Performance Graphs -->
+<div class="charts-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;">
     <div class="chart-card">
         <div class="chart-title">
             <i class="fa-solid fa-chart-line" style="color:#27ae60;"></i> Revenue Trend over Time
         </div>
-        <div style="position:relative;height:280px;">
+        <div style="position:relative;height:320px;">
             <canvas id="revenueChartCanvas"></canvas>
         </div>
     </div>
@@ -168,29 +179,8 @@ requireRole(['admin']);
         <div class="chart-title">
             <i class="fa-solid fa-chart-column" style="color:#4ecdc4;"></i> Booking Volume Breakdown
         </div>
-        <div style="position:relative;height:280px;">
+        <div style="position:relative;height:320px;">
             <canvas id="bookingsChartCanvas"></canvas>
-        </div>
-    </div>
-</div>
-
-<!-- Charts Row 2: Doughnut & Pie -->
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;">
-    <div class="chart-card">
-        <div class="chart-title">
-            <i class="fa-solid fa-chart-pie" style="color:#a855f7;"></i> Package Popularity Share
-        </div>
-        <div style="position:relative;height:280px;display:flex;align-items:center;justify-content:center;">
-            <canvas id="packageChartCanvas"></canvas>
-        </div>
-    </div>
-
-    <div class="chart-card">
-        <div class="chart-title">
-            <i class="fa-solid fa-wallet" style="color:#f5a623;"></i> Payment Method Distribution
-        </div>
-        <div style="position:relative;height:280px;display:flex;align-items:center;justify-content:center;">
-            <canvas id="paymentMethodChartCanvas"></canvas>
         </div>
     </div>
 </div>
@@ -224,7 +214,7 @@ requireRole(['admin']);
 let currentPeriod = 'monthly';
 let customFrom    = '';
 let customTo      = '';
-let revenueChart, bookingsChart, packageChart, paymentMethodChart;
+let revenueChart, bookingsChart;
 
 // Helper: Format PHP Currency
 function formatPHP(amount) {
@@ -261,22 +251,6 @@ function initCharts() {
             scales: { y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: 'rgba(255,255,255,0.06)' } }, x: { grid: { display: false } } }
         }
     });
-
-    // 3. Package Popularity Doughnut Chart
-    const ctxPkg = document.getElementById('packageChartCanvas').getContext('2d');
-    packageChart = new Chart(ctxPkg, {
-        type: 'doughnut',
-        data: { labels: [], datasets: [{ data: [], backgroundColor: ['#a855f7','#4ecdc4','#f5a623','#e94560','#27ae60','#3498db'] }] },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
-    });
-
-    // 4. Payment Method Pie Chart
-    const ctxPm = document.getElementById('paymentMethodChartCanvas').getContext('2d');
-    paymentMethodChart = new Chart(ctxPm, {
-        type: 'pie',
-        data: { labels: [], datasets: [{ data: [], backgroundColor: ['#27ae60','#f5a623','#3498db','#9b59b6'] }] },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
-    });
 }
 
 function loadReportsData() {
@@ -311,16 +285,6 @@ function loadReportsData() {
             bookingsChart.data.labels = data.bookingsChart.labels;
             bookingsChart.data.datasets[0].data = data.bookingsChart.data;
             bookingsChart.update();
-
-            // Update Package Doughnut Chart
-            packageChart.data.labels = data.topPackages.labels;
-            packageChart.data.datasets[0].data = data.topPackages.data;
-            packageChart.update();
-
-            // Update Payment Method Pie Chart
-            paymentMethodChart.data.labels = data.paymentMethods.labels;
-            paymentMethodChart.data.datasets[0].data = data.paymentMethods.data;
-            paymentMethodChart.update();
 
             // Update Transactions Table
             const tbody = document.getElementById('transactionsTbody');
