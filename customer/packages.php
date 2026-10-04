@@ -101,7 +101,7 @@ $catIcons = [
                 CraftHub policy requires all ongoing bookings to be <strong>fully paid</strong> before you can purchase or book another package.
             </p>
             <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-                <a href="<?= APP_URL ?>/customer/bookings.php" class="btn btn-primary btn-sm" style="background:#e94560;border-color:#e94560;">
+                <a href="<?= APP_URL ?>/customer/bookings.php" class="btn btn-primary btn-sm">
                     <i class="fa-solid fa-file-invoice-dollar"></i> View My Bookings &amp; Balances
                 </a>
                 <a href="<?= APP_URL ?>/customer/payment_history.php" class="btn btn-secondary btn-sm">

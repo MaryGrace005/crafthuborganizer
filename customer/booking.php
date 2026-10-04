@@ -479,7 +479,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
 
         <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap;">
-            <a href="<?= APP_URL ?>/customer/bookings.php" class="btn btn-primary" style="background:#e94560;border-color:#e94560;padding:12px 28px;font-weight:700;">
+            <a href="<?= APP_URL ?>/customer/bookings.php" class="btn btn-primary" style="padding:12px 28px;font-weight:700;">
                 <i class="fa-solid fa-file-invoice"></i> View My Bookings &amp; Settle Balance
             </a>
             <a href="<?= APP_URL ?>/customer/packages.php" class="btn btn-secondary" style="padding:12px 28px;">

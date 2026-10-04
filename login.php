@@ -131,7 +131,7 @@ end_login:
 
                 <div class="flex-between mb-2" style="font-size:0.88rem;">
                     <label style="display:flex;align-items:center;gap:8px;color:var(--text-secondary);cursor:pointer;">
-                        <input type="checkbox" name="remember" style="accent-color:var(--accent-red);">
+                        <input type="checkbox" name="remember" style="accent-color:var(--accent-blue);">
                         Remember me
                     </label>
                     <a href="<?= APP_URL ?>/forgot_password.php" class="auth-link">Forgot password?</a>

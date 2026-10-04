@@ -224,7 +224,7 @@ if ($urlStep === 2 && isset($_SESSION['signup_user_id'])) {
 
 
 
-                <button type="submit" class="btn btn-primary btn-block" style="height:52px;font-size:1rem;font-weight:700;border-radius:14px;margin-top:8px;background:linear-gradient(135deg,#4ecdc4,#2da99e);box-shadow:0 8px 24px rgba(78,205,196,0.35);border:none;">
+                <button type="submit" class="btn btn-primary btn-block" style="height:52px;font-size:1rem;font-weight:700;border-radius:14px;margin-top:8px;">
                     <i class="fa-solid fa-arrow-right"></i> Continue to Event Profile
                 </button>
             </form>
@@ -276,7 +276,7 @@ if ($urlStep === 2 && isset($_SESSION['signup_user_id'])) {
                     <a href="<?= APP_URL ?>/pending.php" class="btn btn-secondary" style="flex:0 0 auto;height:52px;border-radius:14px;display:flex;align-items:center;gap:8px;">
                         <i class="fa-solid fa-forward-step"></i> Skip
                     </a>
-                    <button type="submit" class="btn btn-primary" style="flex:1;height:52px;font-size:1rem;font-weight:700;border-radius:14px;background:linear-gradient(135deg,#f5a623,#e8830c);box-shadow:0 8px 24px rgba(245,166,35,0.35);border:none;">
+                    <button type="submit" class="btn btn-primary" style="flex:1;height:52px;font-size:1rem;font-weight:700;border-radius:14px;">
                         <i class="fa-solid fa-paper-plane"></i> Submit Application
                     </button>
                 </div>

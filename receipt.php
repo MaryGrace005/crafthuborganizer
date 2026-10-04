@@ -213,10 +213,10 @@ $isCancelled  = strtolower($payment['booking_status'] ?? '') === 'cancelled';
         }
         .btn-secondary:hover { background: rgba(255,255,255,0.15); }
         .btn-primary {
-            background: linear-gradient(135deg, #4ecdc4, #2b938b);
-            color: #0f0f1a;
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: #fff;
         }
-        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(78,205,196,0.4); }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(37,99,235,0.45); }
 
         @media print {
             body { background: #fff !important; color: #000 !important; padding: 0; }

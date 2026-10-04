@@ -220,7 +220,7 @@ $pkgFeatured = [false, true, false]; // middle = featured
 <section class="section features-section" id="features">
     <div class="section-inner">
         <div class="features-header reveal">
-            <div class="section-badge badge-red">
+            <div class="section-badge badge-blue">
                 <i class="fa-solid fa-bolt"></i> Features
             </div>
             <h2 class="section-title">Everything You Need to<br><span>Run Perfect Events</span></h2>
@@ -228,8 +228,8 @@ $pkgFeatured = [false, true, false]; // middle = featured
         </div>
 
         <div class="features-grid">
-            <div class="feature-card reveal reveal-delay-1" style="--fc-color: rgba(233,69,96,0.08); --fc-border: rgba(233,69,96,0.3);">
-                <div class="feature-icon" style="background: linear-gradient(135deg, #e94560, #c0392b);">
+            <div class="feature-card reveal reveal-delay-1" style="--fc-color: rgba(37,99,235,0.08); --fc-border: rgba(37,99,235,0.3);">
+                <div class="feature-icon" style="background: linear-gradient(135deg, #2563eb, #1d4ed8);">
                     <i class="fa-solid fa-box-open"></i>
                 </div>
                 <div class="feature-title">Craft Package Catalog</div>
@@ -268,8 +268,8 @@ $pkgFeatured = [false, true, false]; // middle = featured
                 <div class="feature-desc">Separate dashboards for Admins, Cashiers, and Customers — each with tailored permissions and workflows.</div>
             </div>
 
-            <div class="feature-card reveal reveal-delay-3" style="--fc-color: rgba(233,69,96,0.08); --fc-border: rgba(233,69,96,0.3);">
-                <div class="feature-icon" style="background: linear-gradient(135deg, #e94560, #f5a623);">
+            <div class="feature-card reveal reveal-delay-3" style="--fc-color: rgba(59,130,246,0.08); --fc-border: rgba(59,130,246,0.3);">
+                <div class="feature-icon" style="background: linear-gradient(135deg, #3b82f6, #0284c7);">
                     <i class="fa-solid fa-chart-line"></i>
                 </div>
                 <div class="feature-title">Analytics & Audit Logs</div>
@@ -294,7 +294,7 @@ $pkgFeatured = [false, true, false]; // middle = featured
 
         <div class="steps-grid">
             <div class="step-card reveal reveal-delay-1">
-                <div class="step-num" style="color: #e94560;">01</div>
+                <div class="step-num" style="color: #2563eb;">01</div>
                 <div class="step-title">Create Your Account</div>
                 <div class="step-desc">Sign up in seconds with your email. No credit card required to explore packages and venues.</div>
             </div>
