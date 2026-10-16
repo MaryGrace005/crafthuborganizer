@@ -64,6 +64,7 @@ $isCancelled  = strtolower($payment['booking_status'] ?? '') === 'cancelled';
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Official Receipt #<?= htmlspecialchars($orNumber) ?> — <?= APP_NAME ?></title>
+    <link rel="icon" type="image/png" href="<?= APP_URL ?>/assets/images/logo.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -111,7 +112,14 @@ $isCancelled  = strtolower($payment['booking_status'] ?? '') === 'cancelled';
             color: var(--accent-teal);
             display: inline-flex;
             align-items: center;
-            gap: 8px;
+            gap: 12px;
+        }
+        .receipt-logo-img {
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            object-fit: cover;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
         }
         .receipt-badge {
             font-size: 0.76rem;
@@ -277,7 +285,8 @@ $isCancelled  = strtolower($payment['booking_status'] ?? '') === 'cancelled';
 <div class="receipt-card">
     <div class="receipt-header">
         <div class="brand-logo">
-            <i class="fa-solid fa-palette"></i> <?= APP_NAME ?>
+            <img src="<?= APP_URL ?>/assets/images/logo.png" alt="CraftHub Logo" class="receipt-logo-img" width="40" height="40" style="width:40px;height:40px;min-width:40px;max-width:40px;border-radius:50%;object-fit:cover;box-shadow:0 3px 10px rgba(0,0,0,0.35);vertical-align:middle;display:inline-block;">
+            <span><?= APP_NAME ?></span>
         </div>
         <div class="receipt-badge">Official Payment Receipt</div>
     </div>

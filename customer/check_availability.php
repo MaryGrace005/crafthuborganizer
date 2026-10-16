@@ -58,7 +58,7 @@ if ($available) {
     // Find out who has it (without exposing customer info)
     $bStmt = $db->prepare("
         SELECT event_date FROM bookings
-        WHERE venue_id = ? AND event_date = ? AND status NOT IN ('Cancelled')
+        WHERE venue_id = ? AND event_date = ? AND status IN ('Pending','Confirmed','Paid')
         LIMIT 1
     ");
     $bStmt->execute([$venueId, $eventDate]);

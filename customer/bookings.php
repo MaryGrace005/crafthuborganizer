@@ -8,6 +8,9 @@ $user = getCurrentUser();
 $db   = getDB();
 $userId = $user['user_id'] ?? $user['id'];
 
+// Auto-sync: mark past bookings as Completed/Cancelled in real-time
+syncPastBookingsAndSlots($db);
+
 // ── Handle Payment Proof Upload POST ─────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'submit_payment_proof') {
     $bookingId = (int)($_POST['booking_id'] ?? 0);
@@ -364,4 +367,45 @@ function closePayProofModal() {
 }
 </script>
 
+<script>
+// ── Real-Time Booking Status Sync ──────────────────────────
+(function() {
+    const BASE = '<?= APP_URL ?>';
+    let lastStatuses = {};
+    
+    // Capture current booking statuses from the page
+    document.querySelectorAll('#bookingsTable tbody tr').forEach(row => {
+        const refEl = row.querySelector('.ref-chip');
+        if (refEl) {
+            lastStatuses[refEl.textContent.trim()] = row.innerHTML;
+        }
+    });
+
+    let lastHash = null;
+
+    function checkSync() {
+        // Do not reload if user is interacting with a modal
+        if (document.querySelector('.modal.show, .modal[style*="display: block"], .modal[style*="display: flex"]')) return;
+
+        fetch(BASE + '/customer/api_booking_sync.php?action=my_bookings', { credentials: 'same-origin' })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.bookings) return;
+                const currentHash = JSON.stringify(data.bookings.map(b => ({ id: b.id, status: b.status })));
+                if (lastHash !== null && lastHash !== currentHash) {
+                    location.reload();
+                }
+                lastHash = currentHash;
+            })
+            .catch(() => {});
+    }
+
+    // Initial check to prime lastHash
+    checkSync();
+    // Poll every 30 seconds
+    setInterval(checkSync, 30000);
+})();
+</script>
+
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
+

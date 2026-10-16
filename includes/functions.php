@@ -180,11 +180,90 @@ function paginate(int $total, int $perPage, int $currentPage): array {
 }
 
 // -----------------------------------------------
-//  Get All Packages (active)
+//  Auto-Sync Past Bookings & Restore Slots
+// -----------------------------------------------
+/**
+ * Automatically syncs past event bookings:
+ * - When a booked date is already done (event_date < CURDATE()), Confirmed or Paid
+ *   bookings are automatically marked as 'Completed'.
+ * - If a booking was still 'Pending' and its event date has passed without approval,
+ *   it is automatically marked as 'Cancelled'.
+ * - This immediately and automatically restores package slots and venue availability.
+ */
+function syncPastBookingsAndSlots(?PDO $db = null): void {
+    if (!$db) $db = getDB();
+    try {
+        // Auto-complete confirmed or paid bookings whose event date has already passed
+        $db->exec("
+            UPDATE bookings 
+            SET status = 'Completed' 
+            WHERE event_date < CURDATE() 
+              AND status IN ('Confirmed', 'Paid')
+        ");
+        
+        // Auto-cancel pending bookings whose event date has passed without approval
+        $db->exec("
+            UPDATE bookings 
+            SET status = 'Cancelled', 
+                notes = CONCAT(COALESCE(notes,''), ' [System: Auto-cancelled - event date passed while pending]') 
+            WHERE event_date < CURDATE() 
+              AND status = 'Pending'
+        ");
+    } catch (Exception $e) {
+        // Graceful catch - don't crash pages if DB is locked
+    }
+}
+
+/**
+ * Get live slot status for a single package
+ */
+function getPackageLiveSlots(int $packageId, ?PDO $db = null): array {
+    if (!$db) $db = getDB();
+    syncPastBookingsAndSlots($db);
+
+    $stmt = $db->prepare("
+        SELECT p.package_id, p.package_name,
+               COALESCE(p.max_slots, 5) AS max_slots,
+               (SELECT COUNT(*) FROM bookings b 
+                WHERE b.package_id = p.package_id 
+                  AND b.status IN ('Pending','Confirmed','Paid') 
+                  AND b.event_date >= CURDATE()) AS active_bookings,
+               GREATEST(0, COALESCE(p.max_slots, 5) - (
+                SELECT COUNT(*) FROM bookings b 
+                WHERE b.package_id = p.package_id 
+                  AND b.status IN ('Pending','Confirmed','Paid') 
+                  AND b.event_date >= CURDATE())) AS available_slots
+        FROM packages p 
+        WHERE p.package_id = ?
+    ");
+    $stmt->execute([$packageId]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        return ['exists' => false, 'max_slots' => 0, 'active_bookings' => 0, 'available_slots' => 0, 'is_full' => true];
+    }
+    $maxSlots  = (int)$row['max_slots'];
+    $available = (int)$row['available_slots'];
+    $active    = (int)$row['active_bookings'];
+    return [
+        'exists'           => true,
+        'package_id'       => (int)$row['package_id'],
+        'package_name'     => $row['package_name'],
+        'max_slots'        => $maxSlots,
+        'active_bookings'  => $active,
+        'available_slots'  => $available,
+        'is_full'          => ($available <= 0),
+        'pct_booked'       => $maxSlots > 0 ? min(100, round($active / $maxSlots * 100)) : 100
+    ];
+}
+
+// -----------------------------------------------
+//  Get All Packages (active) with Live Slot Counts
 // -----------------------------------------------
 function getActivePackages(): array {
     $db   = getDB();
     ensureDiscountColumns($db);
+    syncPastBookingsAndSlots($db);
+
     $stmt = $db->query("SELECT package_id AS id, package_id, package_name AS name, package_name,
         base_price AS price, base_price, description, status,
         COALESCE(full_payment_discount_percent,10) AS full_payment_discount_percent,
@@ -193,8 +272,8 @@ function getActivePackages(): array {
         COALESCE(max_slots, 5)                    AS max_slots,
         (SELECT COUNT(*) FROM bookings WHERE package_id = p.package_id AND status NOT IN ('Cancelled')) AS booked_count,
         (SELECT COUNT(*) FROM bookings WHERE package_id = p.package_id AND status = 'Completed') AS completed_count,
-        (SELECT COUNT(*) FROM bookings WHERE package_id = p.package_id AND status IN ('Pending','Confirmed','Paid')) AS active_booking_count,
-        GREATEST(0, COALESCE(p.max_slots, 5) - (SELECT COUNT(*) FROM bookings WHERE package_id = p.package_id AND status IN ('Pending','Confirmed','Paid'))) AS available_slots
+        (SELECT COUNT(*) FROM bookings WHERE package_id = p.package_id AND status IN ('Pending','Confirmed','Paid') AND event_date >= CURDATE()) AS active_booking_count,
+        GREATEST(0, COALESCE(p.max_slots, 5) - (SELECT COUNT(*) FROM bookings WHERE package_id = p.package_id AND status IN ('Pending','Confirmed','Paid') AND event_date >= CURDATE())) AS available_slots
         FROM packages p WHERE status = 'active' ORDER BY base_price ASC");
     return $stmt->fetchAll();
 }
@@ -375,6 +454,7 @@ function updateBookingPaymentStatus(int $bookingId): void {
 // -----------------------------------------------
 function getDashboardStats(string $role, int $userId = 0): array {
     $db    = getDB();
+    syncPastBookingsAndSlots($db);
     $stats = [];
 
     if ($role === 'admin') {
@@ -423,11 +503,18 @@ function getDashboardStats(string $role, int $userId = 0): array {
  * @return bool  TRUE = slot is free, FALSE = already booked
  */
 function isVenueDateAvailable(int $venueId, string $date, ?int $excludeBookingId = null): bool {
+    // Past dates cannot be booked
+    if ($date <= date('Y-m-d')) {
+        return false;
+    }
+
     $db     = getDB();
+    syncPastBookingsAndSlots($db);
+
     $sql    = "SELECT COUNT(*) FROM bookings
                WHERE venue_id   = ?
                  AND event_date = ?
-                 AND status NOT IN ('Cancelled')";
+                 AND status IN ('Pending','Confirmed','Paid')";
     $params = [$venueId, $date];
 
     if ($excludeBookingId !== null) {
@@ -454,12 +541,15 @@ function getVenueBookedDates(int $venueId, string $fromDate = '', string $toDate
     if (!$toDate)   $toDate   = date('Y-m-d', strtotime('+12 months'));
 
     $db   = getDB();
+    // Auto-sync: mark past bookings as Completed/Cancelled first
+    syncPastBookingsAndSlots($db);
+
     $stmt = $db->prepare("
         SELECT event_date
         FROM bookings
         WHERE venue_id   = ?
           AND event_date BETWEEN ? AND ?
-          AND status NOT IN ('Cancelled')
+          AND status IN ('Pending','Confirmed','Paid')
         ORDER BY event_date ASC
     ");
     $stmt->execute([$venueId, $fromDate, $toDate]);

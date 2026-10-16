@@ -8,7 +8,6 @@
 -- 5. Soft Delete / Archived status support
 -- ============================================================
 
-USE crafthub;
 
 -- 1. Add cancellation_reason to bookings table
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS cancellation_reason TEXT NULL AFTER notes;

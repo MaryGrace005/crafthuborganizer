@@ -1,7 +1,3 @@
--- Create database
-CREATE DATABASE IF NOT EXISTS crafthub;
-USE crafthub;
-
 -- Table: users
 CREATE TABLE IF NOT EXISTS users (
     user_id INT AUTO_INCREMENT PRIMARY KEY,

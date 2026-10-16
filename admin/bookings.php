@@ -4,6 +4,9 @@ require_once __DIR__ . '/../includes/header.php';
 requireRole(['admin']);
 $db = getDB();
 
+// Auto-sync: mark past bookings as Completed/Cancelled in real-time
+syncPastBookingsAndSlots($db);
+
 // Handle status updates
 // Handle status updates and management
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -676,3 +679,37 @@ document.getElementById('viewDetailsModal').addEventListener('click', function(e
     }
 });
 </script>
+
+<script>
+// ── Real-Time Booking Status Sync (Admin) ───────────────────
+(function() {
+    const BASE = '<?= APP_URL ?>';
+    let lastHash = null;
+
+    function checkSync() {
+        // Do not reload while the user is actively searching or has an open modal
+        const searchInput = document.getElementById('bookingSearchInput');
+        if (searchInput && document.activeElement === searchInput && searchInput.value.trim() !== '') return;
+        if (document.querySelector('.modal.show, .modal[style*="display: block"], .modal[style*="display: flex"]')) return;
+
+        fetch(BASE + '/customer/api_booking_sync.php?action=status', { credentials: 'same-origin' })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.counts) return;
+                const currentHash = JSON.stringify(data.counts);
+                if (lastHash !== null && lastHash !== currentHash) {
+                    // Statuses have transitioned or new bookings arrived — reload table
+                    location.reload();
+                }
+                lastHash = currentHash;
+            })
+            .catch(() => {});
+    }
+
+    // Initial check to prime lastHash
+    checkSync();
+    // Poll every 30 seconds
+    setInterval(checkSync, 30000);
+})();
+</script>
+

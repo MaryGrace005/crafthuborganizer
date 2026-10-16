@@ -120,9 +120,9 @@ $roleLabel  = ucfirst($_SESSION['user_role']);
         <button class="topbar-toggle" id="topbarToggle" aria-label="Toggle menu">
             <i class="fa-solid fa-bars"></i>
         </button>
-        <div class="topbar-logo">
-            <i class="fa-solid fa-palette"></i>
-            <span><?= APP_NAME ?></span>
+        <div class="topbar-logo" style="display:flex;align-items:center;gap:10px;">
+            <img src="<?= APP_URL ?>/assets/images/logo.png" alt="CraftHub Logo" class="topbar-logo-img" width="34" height="34" style="width:34px;height:34px;min-width:34px;max-width:34px;border-radius:50%;object-fit:cover;display:inline-block;vertical-align:middle;box-shadow:0 2px 8px rgba(0,0,0,0.35);flex-shrink:0;">
+            <span style="font-family:'Outfit',sans-serif;font-weight:800;font-size:1.1rem;background:linear-gradient(135deg,#f0f0ff,#4ecdc4);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:-0.01em;"><?= APP_NAME ?></span>
         </div>
         <div class="topbar-divider"></div>
         <div class="topbar-title">

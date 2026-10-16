@@ -9,6 +9,10 @@ requireApproved();
 
 $db = getDB();
 $userId = $_SESSION['user_id'] ?? 0;
+
+// Auto-sync past bookings to free up slots in real-time
+syncPastBookingsAndSlots($db);
+
 $ongoingBookings = getCustomerOngoingBookings($userId);
 $hasOngoingPayment = !empty($ongoingBookings);
 $totalOngoingBalance = array_sum(array_column($ongoingBookings, 'calculated_balance'));
@@ -16,7 +20,7 @@ $totalOngoingBalance = array_sum(array_column($ongoingBookings, 'calculated_bala
 // Ensure discount columns exist
 ensureDiscountColumns($db);
 
-// Fetch active packages with live available slot counts
+// Fetch active packages with live available slot counts (only future bookings occupy slots)
 $packages = $db->query("
     SELECT p.*, p.package_id AS id, p.package_name AS name,
            p.base_price AS price,
@@ -26,10 +30,12 @@ $packages = $db->query("
            COALESCE(p.max_slots, 5) AS max_slots,
            (SELECT COUNT(*) FROM bookings b
             WHERE b.package_id = p.package_id
-            AND b.status IN ('Pending','Confirmed','Paid')) AS active_bookings,
+            AND b.status IN ('Pending','Confirmed','Paid')
+            AND b.event_date >= CURDATE()) AS active_bookings,
            GREATEST(0, COALESCE(p.max_slots, 5) - (SELECT COUNT(*) FROM bookings b
             WHERE b.package_id = p.package_id
-            AND b.status IN ('Pending','Confirmed','Paid'))) AS available_slots
+            AND b.status IN ('Pending','Confirmed','Paid')
+            AND b.event_date >= CURDATE())) AS available_slots
     FROM packages p
     WHERE p.status = 'active'
     ORDER BY p.base_price ASC
@@ -199,7 +205,7 @@ $catIcons = [
             // Image fallback logic
             $imgPath     = !empty($pkg['image_url']) ? $pkg['image_url'] : ($defaultImages[$pkg['event_type']] ?? 'assets/images/packages/wedding.png');
         ?>
-        <div class="package-card pkg-item-card" data-event-type="<?= htmlspecialchars($pkg['event_type']) ?>" style="overflow:hidden;<?= $isFull ? 'opacity:0.75;' : '' ?>">
+        <div class="package-card pkg-item-card" data-event-type="<?= htmlspecialchars($pkg['event_type']) ?>" data-package-id="<?= (int)$pkg['id'] ?>" style="overflow:hidden;<?= $isFull ? 'opacity:0.75;' : '' ?>">
 
             <!-- Package Preview Image -->
             <div style="position:relative;height:180px;overflow:hidden;background:#1a1a2e;">
@@ -315,50 +321,48 @@ $catIcons = [
                 </div>
 
                 <!-- Slot Availability -->
-                <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border-color);">
+                <div class="slot-availability-section" data-slot-pkg="<?= (int)$pkg['id'] ?>" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border-color);">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
                         <span style="font-size:0.8rem;font-weight:600;color:var(--text-secondary);">
                             <i class="fa-solid fa-calendar-days"></i> Slot Availability
                         </span>
-                        <?php if ($isFull): ?>
-                            <span style="font-size:0.8rem;font-weight:700;color:#e94560;">
+                        <span class="slot-status-text" style="font-size:0.8rem;font-weight:700;color:<?= $isFull ? '#e94560' : $slotColor ?>;">
+                            <?php if ($isFull): ?>
                                 <i class="fa-solid fa-circle-xmark"></i> Fully Booked
-                            </span>
-                        <?php else: ?>
-                            <span style="font-size:0.8rem;font-weight:700;color:<?= $slotColor ?>;">
+                            <?php else: ?>
                                 <?= $available ?> of <?= $maxSlots ?> slot<?= $maxSlots > 1 ? 's' : '' ?> left
-                            </span>
-                        <?php endif; ?>
+                            <?php endif; ?>
+                        </span>
                     </div>
                     <!-- Progress Bar -->
                     <div style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:20px;height:8px;overflow:hidden;">
-                        <div style="height:100%;width:<?= $pctBooked ?>%;background:<?= $slotColor ?>;border-radius:20px;transition:width 0.3s ease;"></div>
+                        <div class="slot-progress-bar" style="height:100%;width:<?= $pctBooked ?>%;background:<?= $slotColor ?>;border-radius:20px;transition:width 0.6s ease;"></div>
                     </div>
-                    <?php if ($isFull): ?>
-                        <p style="font-size:0.78rem;color:var(--text-muted);margin-top:6px;text-align:center;">
+                    <p class="slot-warning-text" style="font-size:0.78rem;margin-top:6px;<?php if ($isFull): ?>color:var(--text-muted);text-align:center;<?php elseif ($available <= 2): ?>color:#f5a623;font-weight:600;<?php else: ?>display:none;<?php endif; ?>">
+                        <?php if ($isFull): ?>
                             This package is currently fully booked. Please check back later.
-                        </p>
-                    <?php elseif ($available <= 2): ?>
-                        <p style="font-size:0.78rem;color:#f5a623;margin-top:6px;font-weight:600;">
+                        <?php elseif ($available <= 2): ?>
                             <i class="fa-solid fa-triangle-exclamation"></i> Only <?= $available ?> slot<?= $available > 1 ? 's' : '' ?> remaining — book now!
-                        </p>
-                    <?php endif; ?>
+                        <?php endif; ?>
+                    </p>
                 </div>
             </div>
             <div class="package-card-footer">
+                <div class="slot-book-action" data-book-pkg="<?= (int)$pkg['id'] ?>">
                 <?php if ($isFull): ?>
-                    <button class="btn btn-secondary btn-block" disabled style="cursor:not-allowed;opacity:0.6;">
+                    <button class="btn btn-secondary btn-block btn-fully-booked" disabled style="cursor:not-allowed;opacity:0.6;">
                         <i class="fa-solid fa-ban"></i> Fully Booked
                     </button>
                 <?php elseif ($hasOngoingPayment): ?>
-                    <button class="btn btn-secondary btn-block" disabled style="cursor:not-allowed;opacity:0.85;background:rgba(233,69,96,0.15);border:1px solid rgba(233,69,96,0.35);color:#e94560;font-weight:700;" title="You must settle all ongoing payments before booking a new package.">
+                    <button class="btn btn-secondary btn-block btn-payment-lock" disabled style="cursor:not-allowed;opacity:0.85;background:rgba(233,69,96,0.15);border:1px solid rgba(233,69,96,0.35);color:#e94560;font-weight:700;" title="You must settle all ongoing payments before booking a new package.">
                         <i class="fa-solid fa-lock"></i> Full Payment Required
                     </button>
                 <?php else: ?>
-                    <a href="<?= APP_URL ?>/customer/booking.php?package_id=<?= $pkg['id'] ?>" class="btn btn-primary btn-block">
+                    <a href="<?= APP_URL ?>/customer/booking.php?package_id=<?= $pkg['id'] ?>" class="btn btn-primary btn-block btn-book-now">
                         <i class="fa-solid fa-calendar-plus"></i> Book This Package
                     </a>
                 <?php endif; ?>
+                </div>
             </div>
         </div>
         <?php endforeach; ?>
@@ -382,4 +386,99 @@ function filterPackages(eventType) {
         }
     });
 }
+
+// ── Real-Time Slot Availability Polling ──────────────────────
+(function() {
+    const BASE = '<?= APP_URL ?>';
+    const HAS_ONGOING = <?= $hasOngoingPayment ? 'true' : 'false' ?>;
+    const POLL_INTERVAL = 30000; // 30 seconds
+
+    function getSlotColor(available) {
+        if (available <= 1) return '#e94560';
+        if (available <= 3) return '#f5a623';
+        return '#27ae60';
+    }
+
+    function refreshSlots() {
+        fetch(BASE + '/customer/api_slots.php', { credentials: 'same-origin' })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.packages) return;
+
+                data.packages.forEach(pkg => {
+                    const card = document.querySelector(`.pkg-item-card[data-package-id="${pkg.id}"]`);
+                    if (!card) return;
+
+                    const slotSection = card.querySelector('.slot-availability-section');
+                    const statusText  = card.querySelector('.slot-status-text');
+                    const progressBar = card.querySelector('.slot-progress-bar');
+                    const warningText = card.querySelector('.slot-warning-text');
+                    const bookAction  = card.querySelector('.slot-book-action');
+                    if (!slotSection || !statusText || !progressBar) return;
+
+                    const color = getSlotColor(pkg.available_slots);
+                    const isFull = pkg.is_full;
+
+                    // Update card opacity
+                    card.style.opacity = isFull ? '0.75' : '1';
+
+                    // Update status text
+                    if (isFull) {
+                        statusText.innerHTML = '<i class="fa-solid fa-circle-xmark"></i> Fully Booked';
+                        statusText.style.color = '#e94560';
+                    } else {
+                        const slotWord = pkg.max_slots > 1 ? 'slots' : 'slot';
+                        statusText.textContent = `${pkg.available_slots} of ${pkg.max_slots} ${slotWord} left`;
+                        statusText.style.color = color;
+                    }
+
+                    // Update progress bar
+                    progressBar.style.width = pkg.pct_booked + '%';
+                    progressBar.style.background = color;
+
+                    // Update warning text
+                    if (warningText) {
+                        if (isFull) {
+                            warningText.style.display = '';
+                            warningText.style.color = 'var(--text-muted)';
+                            warningText.style.textAlign = 'center';
+                            warningText.style.fontWeight = 'normal';
+                            warningText.textContent = 'This package is currently fully booked. Please check back later.';
+                        } else if (pkg.available_slots <= 2) {
+                            warningText.style.display = '';
+                            warningText.style.color = '#f5a623';
+                            warningText.style.textAlign = '';
+                            warningText.style.fontWeight = '600';
+                            const slotWord = pkg.available_slots > 1 ? 'slots' : 'slot';
+                            warningText.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Only ${pkg.available_slots} ${slotWord} remaining — book now!`;
+                        } else {
+                            warningText.style.display = 'none';
+                        }
+                    }
+
+                    // Update book button
+                    if (bookAction) {
+                        if (isFull) {
+                            bookAction.innerHTML = `<button class="btn btn-secondary btn-block btn-fully-booked" disabled style="cursor:not-allowed;opacity:0.6;">
+                                <i class="fa-solid fa-ban"></i> Fully Booked
+                            </button>`;
+                        } else if (HAS_ONGOING) {
+                            bookAction.innerHTML = `<button class="btn btn-secondary btn-block btn-payment-lock" disabled style="cursor:not-allowed;opacity:0.85;background:rgba(233,69,96,0.15);border:1px solid rgba(233,69,96,0.35);color:#e94560;font-weight:700;" title="You must settle all ongoing payments before booking a new package.">
+                                <i class="fa-solid fa-lock"></i> Full Payment Required
+                            </button>`;
+                        } else {
+                            bookAction.innerHTML = `<a href="${BASE}/customer/booking.php?package_id=${pkg.id}" class="btn btn-primary btn-block btn-book-now">
+                                <i class="fa-solid fa-calendar-plus"></i> Book This Package
+                            </a>`;
+                        }
+                    }
+                });
+            })
+            .catch(() => {}); // Silent fail - will retry next interval
+    }
+
+    // Poll every 30 seconds
+    setInterval(refreshSlots, POLL_INTERVAL);
+})();
 </script>
+

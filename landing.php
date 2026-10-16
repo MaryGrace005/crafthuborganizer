@@ -83,6 +83,9 @@ $pkgFeatured = [false, true, false]; // middle = featured
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="<?= APP_URL ?>/assets/images/logo.png">
+
     <!-- Stylesheets -->
     <link rel="stylesheet" href="<?= APP_URL ?>/assets/css/landing.css?v=<?= time() ?>">
 
@@ -104,7 +107,7 @@ $pkgFeatured = [false, true, false]; // middle = featured
 <div id="splash-screen">
     <div class="splash-logo-wrap">
         <div class="splash-icon">
-            <i class="fa-solid fa-palette"></i>
+            <img src="<?= APP_URL ?>/assets/images/logo.png" alt="CraftHub Logo" class="splash-logo-img" width="104" height="104" style="width:104px;height:104px;max-width:104px;max-height:104px;border-radius:50%;object-fit:cover;display:block;">
         </div>
         <div class="splash-name">CraftHub</div>
         <div class="splash-tagline">Organizer Platform</div>
@@ -119,7 +122,7 @@ $pkgFeatured = [false, true, false]; // middle = featured
 ══════════════════════════════════════ -->
 <nav class="landing-nav" id="landing-nav">
     <a href="<?= APP_URL ?>/landing.php" class="nav-logo">
-        <div class="nav-logo-icon"><i class="fa-solid fa-palette"></i></div>
+        <img src="<?= APP_URL ?>/assets/images/logo.png" alt="CraftHub Logo" class="nav-logo-img" width="40" height="40" style="width:40px;height:40px;min-width:40px;max-width:40px;border-radius:50%;object-fit:cover;display:block;box-shadow:0 3px 12px rgba(0,0,0,0.35);">
         <span class="nav-logo-text">CraftHub</span>
     </a>
 

@@ -152,11 +152,9 @@ $isPending  = !$isRejected;
 
         <div class="pending-header">
             <!-- Logo -->
-            <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:32px;">
-                <div style="width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,#4ecdc4,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-size:1.1rem;">
-                    <i class="fa-solid fa-palette"></i>
-                </div>
-                <div style="font-family:'Outfit',sans-serif;font-weight:800;font-size:1.3rem;background:linear-gradient(135deg,#fff,#4ecdc4);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">
+            <div style="display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:32px;">
+                <img src="<?= APP_URL ?>/assets/images/logo.png" alt="CraftHub Logo" width="48" height="48" style="width:48px;height:48px;min-width:48px;max-width:48px;border-radius:50%;object-fit:cover;display:block;box-shadow:0 6px 18px rgba(0,0,0,0.4);flex-shrink:0;">
+                <div style="font-family:'Outfit',sans-serif;font-weight:800;font-size:1.4rem;background:linear-gradient(135deg,#fff,#4ecdc4);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">
                     <?= APP_NAME ?>
                 </div>
             </div>

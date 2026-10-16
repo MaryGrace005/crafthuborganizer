@@ -110,10 +110,8 @@ if ($urlStep === 2 && isset($_SESSION['signup_user_id'])) {
         <div style="background:linear-gradient(160deg,#12003a 0%,#1e0025 50%,#0a1a14 100%);padding:48px 38px;display:flex;flex-direction:column;justify-content:space-between;border-right:1px solid rgba(255,255,255,0.06);">
             <div>
                 <!-- Logo -->
-                <div style="display:flex;align-items:center;gap:12px;margin-bottom:36px;">
-                    <div style="width:50px;height:50px;border-radius:16px;background:linear-gradient(135deg,#4ecdc4,#a855f7);display:flex;align-items:center;justify-content:center;font-size:1.5rem;color:#fff;box-shadow:0 8px 24px rgba(78,205,196,0.35);">
-                        <i class="fa-solid fa-palette"></i>
-                    </div>
+                <div style="display:flex;align-items:center;gap:14px;margin-bottom:36px;">
+                    <img src="<?= APP_URL ?>/assets/images/logo.png" alt="CraftHub Logo" width="54" height="54" style="width:54px;height:54px;min-width:54px;max-width:54px;border-radius:50%;object-fit:cover;display:block;box-shadow:0 8px 24px rgba(0,0,0,0.45);flex-shrink:0;">
                     <div style="font-family:'Outfit',sans-serif;font-weight:800;font-size:1.5rem;background:linear-gradient(135deg,#fff,#4ecdc4);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">
                         <?= APP_NAME ?>
                     </div>

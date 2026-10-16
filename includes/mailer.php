@@ -44,9 +44,12 @@ function getCraftHubEmailTemplate(string $title, string $bodyContent, ?string $a
                         </tr>
                         <!-- Header -->
                         <tr>
-                            <td style="padding: 30px 40px 20px 40px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.06);">
-                                <div style="display: inline-block; font-size: 24px; font-weight: 800; color: #ffffff; letter-spacing: -0.02em;">
-                                    <span style="color: #4ecdc4;">Craft</span>Hub <span style="font-weight: 300; color: #a0aec0; font-size: 18px;">Organizer</span>
+                            <td style="padding: 28px 40px 18px 40px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.06);">
+                                <div style="display: inline-block; text-align: center;">
+                                    <img src="' . (defined('APP_URL') ? APP_URL : '') . '/assets/images/logo.png" alt="CraftHub Logo" width="48" height="48" style="display: inline-block; vertical-align: middle; border-radius: 50%; margin-right: 10px;">
+                                    <span style="font-size: 24px; font-weight: 800; color: #ffffff; vertical-align: middle; letter-spacing: -0.02em;">
+                                        <span style="color: #4ecdc4;">Craft</span>Hub <span style="font-weight: 300; color: #a0aec0; font-size: 18px;">Organizer</span>
+                                    </span>
                                 </div>
                             </td>
                         </tr>

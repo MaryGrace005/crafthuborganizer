@@ -7,6 +7,7 @@ require_once __DIR__ . '/../includes/header.php';
 requireRole(['staff', 'cashier']);
 
 $db = getDB();
+syncPastBookingsAndSlots($db);
 
 // ── Selected Month & Year ────────────────────────────────────
 $year  = isset($_GET['year'])  ? (int)$_GET['year']  : (int)date('Y');

@@ -83,9 +83,9 @@ end_login:
 
         <!-- Brand Side -->
         <div class="auth-brand">
-            <div class="auth-brand-logo">
-                <div class="logo-icon"><i class="fa-solid fa-palette"></i></div>
-                <div class="logo-text"><?= APP_NAME ?></div>
+            <div class="auth-brand-logo" style="display:flex;align-items:center;gap:14px;margin-bottom:36px;">
+                <img src="<?= APP_URL ?>/assets/images/logo.png" alt="CraftHub Logo" class="auth-logo-img" width="56" height="56" style="width:56px;height:56px;min-width:56px;max-width:56px;border-radius:50%;object-fit:cover;display:block;box-shadow:0 6px 20px rgba(0,0,0,0.45);flex-shrink:0;">
+                <div class="logo-text" style="font-family:'Outfit',sans-serif;font-size:1.4rem;font-weight:800;color:#fff;"><?= APP_NAME ?></div>
             </div>
             <h2>Your Creative Hub Awaits</h2>
             <p>Manage bookings, packages, venues, and payments — all in one beautifully crafted platform.</p>

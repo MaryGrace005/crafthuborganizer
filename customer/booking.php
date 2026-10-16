@@ -5,6 +5,7 @@ requireRole(['customer']);
 requireApproved();
 
 $db         = getDB();
+syncPastBookingsAndSlots($db);
 $user       = getCurrentUser();
 $userId     = $user['user_id'] ?? $user['id'];
 $ongoingBookings     = getCustomerOngoingBookings($userId);
@@ -78,9 +79,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // ── Package slot availability check (server-side — cannot be bypassed) ──
     if ($pkgId && empty($errors)) {
+        syncPastBookingsAndSlots($db);
         $slotStmt = $db->prepare("
             SELECT COALESCE(max_slots, 5) AS max_slots,
-                   (SELECT COUNT(*) FROM bookings WHERE package_id = ? AND status IN ('Pending','Confirmed','Paid')) AS active_bookings
+                   (SELECT COUNT(*) FROM bookings WHERE package_id = ? AND status IN ('Pending','Confirmed','Paid') AND event_date >= CURDATE()) AS active_bookings
             FROM packages WHERE package_id = ? AND status = 'active'
         ");
         $slotStmt->execute([$pkgId, $pkgId]);

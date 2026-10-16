@@ -33,7 +33,10 @@ $pageTitle = isset($pageTitle) ? $pageTitle . ' | ' . APP_NAME : APP_NAME;
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="<?= APP_URL ?>/assets/images/logo.png">
+
     <!-- Main Stylesheet -->
-    <link rel="stylesheet" href="<?= APP_URL ?>/assets/css/style.css?v=2.2">
+    <link rel="stylesheet" href="<?= APP_URL ?>/assets/css/style.css?v=<?= file_exists(__DIR__ . '/../assets/css/style.css') ? filemtime(__DIR__ . '/../assets/css/style.css') : '3.0' ?>">
 </head>
 <body>

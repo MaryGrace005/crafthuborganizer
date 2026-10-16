@@ -90,7 +90,6 @@ input, select, textarea { font-family: inherit; }
 
 .sidebar.collapsed { width: var(--sidebar-collapsed); }
 
-
 .sidebar-user {
     display: flex;
     align-items: center;
@@ -171,7 +170,6 @@ input, select, textarea { font-family: inherit; }
 .logout-link:hover { background: rgba(233,69,96,0.1); color: var(--accent-red); }
 
 /* Collapsed sidebar overrides */
-.sidebar.collapsed .sidebar-logo span,
 .sidebar.collapsed .sidebar-user-info,
 .sidebar.collapsed .nav-link span { display: none; }
 .sidebar.collapsed .sidebar-user { justify-content: center; padding: 12px; }
@@ -219,13 +217,33 @@ input, select, textarea { font-family: inherit; }
 .topbar-logo {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     font-family: 'Outfit', sans-serif;
     font-weight: 800;
-    font-size: 1.05rem;
-    color: var(--accent-red);
+    font-size: 1.1rem;
+    color: var(--text-primary);
     white-space: nowrap;
     flex-shrink: 0;
+}
+.topbar-logo-img {
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px !important;
+    max-width: 34px !important;
+    min-height: 34px !important;
+    max-height: 34px !important;
+    border-radius: 50% !important;
+    object-fit: cover !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    display: inline-block !important;
+    vertical-align: middle;
+    flex-shrink: 0;
+}
+.topbar-logo span {
+    background: linear-gradient(135deg, #f0f0ff, #4ecdc4);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }
 .topbar-logo i {
     font-size: 1.3rem;
@@ -720,8 +738,17 @@ textarea.form-control { resize: vertical; min-height: 100px; }
 }
 
 .auth-brand-logo {
-    display: flex; align-items: center; gap: 12px;
-    margin-bottom: 40px;
+    display: flex; align-items: center; gap: 14px;
+    margin-bottom: 36px;
+}
+
+.auth-logo-img {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    object-fit: cover;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    flex-shrink: 0;
 }
 
 .auth-brand-logo .logo-icon {
