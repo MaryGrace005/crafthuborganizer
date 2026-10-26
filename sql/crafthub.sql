@@ -1,27 +1,44 @@
 -- Table: users
 CREATE TABLE IF NOT EXISTS users (
     user_id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
+    first_name VARCHAR(20) NULL,
+    middle_name VARCHAR(15) NULL,
+    last_name VARCHAR(20) NULL,
+    surname VARCHAR(20) NULL,
+    name VARCHAR(65) NOT NULL,
     email VARCHAR(100) UNIQUE NOT NULL,
     password VARCHAR(255) NOT NULL,
-    contact_no VARCHAR(20),
+    contact_no VARCHAR(11) NULL COMMENT '11-digit mobile number (09XXXXXXXXX)',
+    gender VARCHAR(20) NULL,
     address TEXT,
+    id_code VARCHAR(20) UNIQUE NULL,
+    temp_password VARCHAR(255) NULL,
+    login_email VARCHAR(191) NULL,
+    business_name VARCHAR(100) NULL,
+    event_type_interest VARCHAR(50) NULL,
+    guest_count_est SMALLINT UNSIGNED NULL,
+    profile_notes TEXT NULL,
+    rejection_reason TEXT NULL,
     ip_address VARCHAR(45) NULL,                           -- Locked device IP per Customer account rule
     role ENUM('customer','staff','cashier','admin') DEFAULT 'customer',
     security_question VARCHAR(255),
     security_answer_hash VARCHAR(255),
-    status ENUM('active','inactive') DEFAULT 'active',
+    status ENUM('active','inactive','pending_approval','rejected') DEFAULT 'active',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Table: packages
 CREATE TABLE IF NOT EXISTS packages (
     package_id INT AUTO_INCREMENT PRIMARY KEY,
-    package_name VARCHAR(100) NOT NULL,
+    package_name VARCHAR(80) NOT NULL,
     event_type ENUM('Wedding','Birthday','Debut','Christening') NOT NULL,
     base_price DECIMAL(10,2) NOT NULL,
-    max_slots INT NOT NULL DEFAULT 5,                      -- Max bookings allowed before package is fully booked
+    full_payment_discount_percent DECIMAL(5,2) NOT NULL DEFAULT 10.00,
+    downpayment_discount_percent DECIMAL(5,2) NOT NULL DEFAULT 5.00,
+    downpayment_percent DECIMAL(5,2) NOT NULL DEFAULT 50.00,
+    max_slots TINYINT UNSIGNED NOT NULL DEFAULT 5,         -- Realistic max bookings (1-50)
     description TEXT,
+    image_url VARCHAR(500) NULL,
     status ENUM('active','inactive') DEFAULT 'active'
 );
 
@@ -30,7 +47,7 @@ CREATE TABLE IF NOT EXISTS package_components (
     component_id INT AUTO_INCREMENT PRIMARY KEY,
     package_id INT NOT NULL,
     category ENUM('venue','food','photography','decoration') NOT NULL,
-    name VARCHAR(100) NOT NULL,
+    name VARCHAR(80) NOT NULL,
     description TEXT,
     price DECIMAL(10,2) NOT NULL,
     FOREIGN KEY (package_id) REFERENCES packages(package_id) ON DELETE CASCADE
@@ -39,16 +56,16 @@ CREATE TABLE IF NOT EXISTS package_components (
 -- Table: venues (standalone, used for booking)
 CREATE TABLE IF NOT EXISTS venues (
     venue_id INT AUTO_INCREMENT PRIMARY KEY,
-    venue_name VARCHAR(100) NOT NULL,
-    capacity INT,
-    location VARCHAR(255),
+    venue_name VARCHAR(80) NOT NULL,
+    capacity SMALLINT UNSIGNED NULL,                       -- Realistic guest capacity (10-5000)
+    location VARCHAR(150),
     availability_status ENUM('available','unavailable') DEFAULT 'available'
 );
 
 -- Table: bookings
 CREATE TABLE IF NOT EXISTS bookings (
     booking_id INT AUTO_INCREMENT PRIMARY KEY,
-    booking_reference VARCHAR(50) UNIQUE,
+    booking_reference VARCHAR(20) UNIQUE,
     customer_id INT NOT NULL,
     package_id INT NOT NULL,
     venue_id INT NULL,
@@ -56,13 +73,21 @@ CREATE TABLE IF NOT EXISTS bookings (
     payment_due_date DATE NULL,
     event_time TIME DEFAULT '09:00:00',
     event_type ENUM('Wedding','Birthday','Debut','Christening') NOT NULL DEFAULT 'Wedding',
-    guest_count INT DEFAULT 1,
+    payment_plan ENUM('full','downpayment') NOT NULL DEFAULT 'full',
+    guest_count SMALLINT UNSIGNED DEFAULT 1,               -- Realistic guest count (1-2000)
+    original_amount DECIMAL(10,2) NULL,
+    discount_percent DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+    discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    downpayment_percent DECIMAL(5,2) NOT NULL DEFAULT 50.00,
+    required_downpayment DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    downpayment_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
     total_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     amount_paid DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     status ENUM('Pending','Confirmed','Paid','Completed','Cancelled') DEFAULT 'Pending',
     approved_at TIMESTAMP NULL DEFAULT NULL,
     approved_by INT NULL,
     notes TEXT,
+    cancellation_reason TEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (customer_id) REFERENCES users(user_id) ON DELETE CASCADE,
     FOREIGN KEY (package_id) REFERENCES packages(package_id) ON DELETE CASCADE,
@@ -75,6 +100,7 @@ CREATE TABLE IF NOT EXISTS booking_components (
     booking_component_id INT AUTO_INCREMENT PRIMARY KEY,
     booking_id INT NOT NULL,
     component_id INT NOT NULL,
+    price_at_booking DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     FOREIGN KEY (booking_id) REFERENCES bookings(booking_id) ON DELETE CASCADE,
     FOREIGN KEY (component_id) REFERENCES package_components(component_id) ON DELETE CASCADE
 );
@@ -86,23 +112,13 @@ CREATE TABLE IF NOT EXISTS payments (
     cashier_id INT NOT NULL,
     amount_paid DECIMAL(10,2) NOT NULL,
     payment_type ENUM('downpayment','full','balance') NOT NULL DEFAULT 'full',
-    payment_method VARCHAR(50) DEFAULT 'cash',
-    reference_no VARCHAR(100),
-    or_number VARCHAR(50) UNIQUE NOT NULL,
+    payment_method VARCHAR(20) DEFAULT 'cash',
+    reference_no VARCHAR(50),
+    or_number VARCHAR(20) UNIQUE NOT NULL,
     notes TEXT,
     payment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (booking_id) REFERENCES bookings(booking_id) ON DELETE CASCADE,
     FOREIGN KEY (cashier_id) REFERENCES users(user_id) ON DELETE CASCADE
-);
-
--- Table: audit_logs
-CREATE TABLE IF NOT EXISTS audit_logs (
-    log_id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NULL,
-    action VARCHAR(255) NOT NULL,
-    table_affected VARCHAR(50),
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE SET NULL
 );
 
 -- Table: booking_images (photos/files attached to an event booking)
@@ -110,20 +126,13 @@ CREATE TABLE IF NOT EXISTS booking_images (
     image_id       INT AUTO_INCREMENT PRIMARY KEY,
     booking_id     INT NOT NULL,
     uploaded_by    INT NULL,                              -- user who uploaded (customer, cashier, or admin)
-    image_type     ENUM(
-                       'event_photo',                     -- photo from the actual event
-                       'payment_proof',                   -- screenshot / receipt image
-                       'contract',                        -- signed contract scan
-                       'venue_photo',                     -- venue inspection photo
-                       'decoration_photo',                -- decoration reference photo
-                       'other'
-                   ) NOT NULL DEFAULT 'event_photo',
+    image_type     VARCHAR(50) NOT NULL DEFAULT 'event_photo',
     image_path     VARCHAR(500) NOT NULL,                 -- relative path: uploads/booking_images/filename.jpg
     original_name  VARCHAR(255) NOT NULL,                 -- original filename uploaded by the user
-    mime_type      VARCHAR(100) DEFAULT 'image/jpeg',     -- image/jpeg, image/png, application/pdf, etc.
+    mime_type      VARCHAR(50) DEFAULT 'image/jpeg',      -- image/jpeg, image/png, application/pdf, etc.
     file_size      INT UNSIGNED DEFAULT 0,                -- file size in bytes
-    caption        VARCHAR(500) NULL,                     -- optional user caption / description
-    is_public      TINYINT(1) DEFAULT 0,                  -- 1 = visible to customer, 0 = admin/cashier only
+    caption        VARCHAR(255) NULL,                     -- optional user caption / description
+    is_public      TINYINT(1) DEFAULT 1,                  -- 1 = visible to customer, 0 = admin/cashier only
     uploaded_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (booking_id)  REFERENCES bookings(booking_id)  ON DELETE CASCADE,
     FOREIGN KEY (uploaded_by) REFERENCES users(user_id)        ON DELETE SET NULL
@@ -131,7 +140,7 @@ CREATE TABLE IF NOT EXISTS booking_images (
 
 -- Migration: add booking_images table if upgrading an existing database
 -- (safe to run even if column already exists — IF NOT EXISTS prevents errors)
-ALTER TABLE bookings ADD COLUMN IF NOT EXISTS booking_reference VARCHAR(50) UNIQUE AFTER booking_id;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS booking_reference VARCHAR(20) UNIQUE AFTER booking_id;
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS event_time TIME DEFAULT '09:00:00' AFTER event_date;
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_due_date DATE NULL AFTER event_date;
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS amount_paid DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER total_amount;
@@ -139,8 +148,8 @@ ALTER TABLE bookings ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP NULL DEFAULT
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS approved_by INT NULL AFTER approved_at;
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS notes TEXT AFTER status;
 
-ALTER TABLE payments ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'cash' AFTER payment_type;
-ALTER TABLE payments ADD COLUMN IF NOT EXISTS reference_no VARCHAR(100) AFTER payment_method;
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS payment_method VARCHAR(20) DEFAULT 'cash' AFTER payment_type;
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS reference_no VARCHAR(50) AFTER payment_method;
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS notes TEXT AFTER or_number;
 
 -- Seed Data (Default Admin, Cashier, Customer users)

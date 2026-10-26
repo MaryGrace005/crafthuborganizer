@@ -35,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $middleName = sanitize($_POST['middle_name'] ?? '');
         $surname    = sanitize($_POST['surname']     ?? '');
         $gender     = sanitize($_POST['gender']      ?? '');
-        $phone      = sanitize($_POST['phone']       ?? '');
+        $phone      = normalizeMobileNumber(sanitize($_POST['phone'] ?? ''));
         $address    = sanitize($_POST['address']     ?? '');
 
         if (empty($firstName)) {
@@ -44,12 +44,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (empty($surname)) {
             $errors[] = 'Surname is required.';
         }
+        if ($phone !== '' && !isValidMobileNumber($phone)) {
+            $errors[] = 'Phone number must be an 11-digit mobile number starting with 09 (e.g. 09171234567).';
+        }
 
         if (empty($errors)) {
             $fullName = trim(implode(' ', array_filter([$firstName, $middleName, $surname])));
             $userId   = $user['user_id'] ?? $user['id'];
-            $stmt     = $db->prepare("UPDATE users SET name = ?, first_name = ?, middle_name = ?, surname = ?, gender = ?, contact_no = ?, address = ? WHERE user_id = ?");
-            $stmt->execute([$fullName, $firstName, $middleName, $surname, $gender, $phone, $address, $userId]);
+            $stmt     = $db->prepare("UPDATE users SET name = ?, first_name = ?, middle_name = ?, last_name = ?, surname = ?, gender = ?, contact_no = ?, address = ? WHERE user_id = ?");
+            $stmt->execute([$fullName, $firstName, $middleName, $surname, $surname, $gender, $phone, $address, $userId]);
             $_SESSION['user_name'] = $fullName;
             logAudit($userId, 'UPDATE_PROFILE', 'Updated profile information', 'users');
             setFlash('success', 'Profile updated successfully!');
@@ -126,12 +129,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="form-group">
                     <label class="form-label" for="first_name">First Name <span style="color:#e94560;">*</span></label>
                     <input type="text" id="first_name" name="first_name" class="form-control"
-                           value="<?= htmlspecialchars($userFirstName) ?>" placeholder="First Name" required>
+                           maxlength="20" value="<?= htmlspecialchars($userFirstName) ?>" placeholder="First Name" required>
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="middle_name">Middle Name</label>
                     <input type="text" id="middle_name" name="middle_name" class="form-control"
-                           value="<?= htmlspecialchars($userMiddleName) ?>" placeholder="Optional">
+                           maxlength="15" value="<?= htmlspecialchars($userMiddleName) ?>" placeholder="Optional">
                 </div>
             </div>
 
@@ -139,7 +142,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="form-group">
                     <label class="form-label" for="surname">Surname <span style="color:#e94560;">*</span></label>
                     <input type="text" id="surname" name="surname" class="form-control"
-                           value="<?= htmlspecialchars($userSurname) ?>" placeholder="Surname" required>
+                           maxlength="20" value="<?= htmlspecialchars($userSurname) ?>" placeholder="Surname" required>
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="gender">Gender</label>
@@ -161,9 +164,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
 
             <div class="form-group">
-                <label class="form-label" for="phone">Phone Number</label>
+                <label class="form-label" for="phone">Phone Number (11 digits)</label>
                 <input type="tel" id="phone" name="phone" class="form-control"
+                       maxlength="11" pattern="09[0-9]{9}" inputmode="numeric"
+                       title="11-digit Philippine mobile number starting with 09 (e.g. 09171234567)"
                        value="<?= htmlspecialchars($user['contact_no'] ?? $user['phone'] ?? '') ?>" placeholder="09XXXXXXXXX">
+                <div class="form-hint" style="color:var(--text-muted);font-size:0.75rem;margin-top:3px;">11 digits starting with 09</div>
             </div>
 
             <div class="form-group">

@@ -17,7 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $surname    = sanitize($_POST['surname']     ?? '');
         $name       = trim(implode(' ', array_filter([$firstName, $middleName, $surname])));
         $email    = sanitize($_POST['email']    ?? '');
-        $phone    = sanitize($_POST['phone']    ?? '');
+        $phone    = normalizeMobileNumber(sanitize($_POST['phone'] ?? ''));
         $address  = sanitize($_POST['address']  ?? '');
         $tempPass = bin2hex(random_bytes(8));
         $role     = in_array($_POST['role'] ?? '', ['customer','staff','cashier','admin']) ? $_POST['role'] : 'customer';
@@ -26,6 +26,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$firstName) $errors[] = 'First name is required.';
         if (!$surname)   $errors[] = 'Surname is required.';
         if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = 'Valid email is required.';
+        if ($phone !== '' && !isValidMobileNumber($phone)) {
+            $errors[] = 'Phone number must be an 11-digit mobile number starting with 09 (e.g. 09171234567).';
+        }
 
         // Check email uniqueness
         $chk = $db->prepare("SELECT user_id FROM users WHERE email = ?");
@@ -34,9 +37,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (empty($errors)) {
             $hash = password_hash($tempPass, PASSWORD_DEFAULT);
-            $db->prepare("INSERT INTO users (name, email, password, temp_password, contact_no, address, role, status)
-                          VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_approval')")
-               ->execute([$name, $email, $hash, $tempPass, $phone, $address, $role]);
+            $db->prepare("INSERT INTO users (name, first_name, middle_name, last_name, surname, email, password, temp_password, contact_no, address, role, status)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_approval')")
+               ->execute([$name, $firstName, $middleName, $surname, $surname, $email, $hash, $tempPass, $phone, $address, $role]);
             $newId = (int)$db->lastInsertId();
             logAudit($adminId, 'CREATE_USER', "Admin created {$role} account for {$email} (pending approval)", 'users');
             setFlash('success', "Account for {$name} created and placed in Pending Approvals. Review the credentials on the approvals page.");
@@ -289,25 +292,27 @@ $users = $db->query($sql)->fetchAll();
                 <div class="form-row" style="grid-template-columns:1fr 1fr;">
                     <div class="form-group">
                         <label class="form-label">First Name <span style="color:var(--accent-red);">*</span></label>
-                        <input type="text" name="first_name" id="userFirstName" class="form-control" placeholder="e.g. Maria" required>
+                        <input type="text" name="first_name" id="userFirstName" class="form-control" placeholder="e.g. Maria" maxlength="20" required>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Middle Name</label>
-                        <input type="text" name="middle_name" class="form-control" placeholder="e.g. Cruz">
+                        <input type="text" name="middle_name" class="form-control" placeholder="e.g. Cruz" maxlength="15">
                     </div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Surname <span style="color:var(--accent-red);">*</span></label>
-                    <input type="text" name="surname" id="userSurname" class="form-control" placeholder="e.g. Santos" required>
+                    <input type="text" name="surname" id="userSurname" class="form-control" placeholder="e.g. Santos" maxlength="20" required>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Email Address <span style="color:var(--accent-red);">*</span></label>
-                    <input type="email" name="email" id="userEmail" class="form-control" placeholder="user@example.com" required>
+                    <input type="email" name="email" id="userEmail" class="form-control" placeholder="user@example.com" maxlength="50" required>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label class="form-label">Phone Number</label>
-                        <input type="tel" name="phone" class="form-control" placeholder="09XXXXXXXXX">
+                        <label class="form-label">Phone Number (11 digits)</label>
+                        <input type="tel" name="phone" class="form-control" placeholder="09XXXXXXXXX"
+                               maxlength="11" pattern="09[0-9]{9}" inputmode="numeric"
+                               title="11-digit Philippine mobile number starting with 09">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Role</label>

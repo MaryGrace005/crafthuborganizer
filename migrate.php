@@ -211,6 +211,7 @@ if (columnExists($db, 'users', 'login_email')) {
 $profilingCols = [
     'first_name'         => "VARCHAR(100) NULL",
     'middle_name'        => "VARCHAR(100) NULL",
+    'last_name'          => "VARCHAR(100) NULL",
     'surname'            => "VARCHAR(100) NULL",
     'gender'             => "VARCHAR(50) NULL",
     'business_name'      => "VARCHAR(150) NULL AFTER id_code",
@@ -230,6 +231,39 @@ foreach ($profilingCols as $col => $def) {
             $results[] = ['label' => "users.{$col}", 'ok' => false, 'msg' => $e->getMessage()];
         }
     }
+}
+
+// ── 8a. Auto-segregate existing combined user names into first_name, middle_name, last_name, surname ──
+try {
+    $needSegregation = $db->query("SELECT user_id, name, first_name, last_name, surname FROM users WHERE (first_name IS NULL OR first_name = '') OR ((last_name IS NULL OR last_name = '') AND (surname IS NULL OR surname = ''))")->fetchAll();
+    $segCount = 0;
+    foreach ($needSegregation as $nu) {
+        $raw = trim($nu['name'] ?? '');
+        if ($raw !== '') {
+            $parts = array_values(array_filter(preg_split('/\s+/', $raw), 'strlen'));
+            $c = count($parts);
+            if ($c === 1) {
+                $fn = $parts[0]; $mn = ''; $ln = $parts[0];
+            } elseif ($c === 2) {
+                $fn = $parts[0]; $mn = ''; $ln = $parts[1];
+            } elseif ($c === 3) {
+                $fn = $parts[0]; $mn = $parts[1]; $ln = $parts[2];
+            } else {
+                $ln = array_pop($parts);
+                $mn = array_pop($parts);
+                $fn = implode(' ', $parts);
+            }
+            $db->prepare("UPDATE users SET first_name = ?, middle_name = ?, last_name = ?, surname = ? WHERE user_id = ?")
+               ->execute([$fn, $mn, $ln, $ln, $nu['user_id']]);
+            $segCount++;
+        }
+    }
+    // Also sync existing last_name <-> surname
+    $db->exec("UPDATE users SET last_name = surname WHERE (last_name IS NULL OR last_name = '') AND surname IS NOT NULL");
+    $db->exec("UPDATE users SET surname = last_name WHERE (surname IS NULL OR surname = '') AND last_name IS NOT NULL");
+    $results[] = ['label' => 'Name segregation backfill', 'ok' => true, 'msg' => "Segregated and synced names for {$segCount} user(s)."];
+} catch (PDOException $e) {
+    $results[] = ['label' => 'Name segregation backfill', 'ok' => false, 'msg' => $e->getMessage()];
 }
 
 // ── 8b. Make bookings.venue_id nullable (venue is optional) ──────────────
@@ -590,6 +624,98 @@ if (columnExists($db, 'bookings', 'approved_by')) {
         $results[] = ['label' => 'approved_by on bookings', 'ok' => false, 'msg' => $e->getMessage()];
     }
 }
+
+// ── 20. Optimize data types and variable ranges for realistic domain constraints ──
+try {
+    // 20a. Clean/normalize any existing contact numbers to strictly 11 digits (e.g. 09XXXXXXXXX)
+    $db->exec("UPDATE users SET contact_no = REGEXP_REPLACE(contact_no, '[^0-9]', '') WHERE contact_no IS NOT NULL AND contact_no != ''");
+    $db->exec("UPDATE users SET contact_no = CONCAT('0', SUBSTRING(contact_no, 3)) WHERE contact_no LIKE '639%' AND LENGTH(contact_no) = 12");
+    $db->exec("UPDATE users SET contact_no = SUBSTRING(contact_no, 1, 11) WHERE LENGTH(contact_no) > 11");
+
+    // 20b. Users table: contact_no VARCHAR(11), names VARCHAR(50), full name VARCHAR(100), guest_count_est SMALLINT UNSIGNED
+    $db->exec("ALTER TABLE users 
+        MODIFY COLUMN contact_no VARCHAR(11) NULL COMMENT '11-digit mobile number (09XXXXXXXXX)',
+        MODIFY COLUMN first_name VARCHAR(50) NULL,
+        MODIFY COLUMN middle_name VARCHAR(50) NULL,
+        MODIFY COLUMN last_name VARCHAR(50) NULL,
+        MODIFY COLUMN surname VARCHAR(50) NULL,
+        MODIFY COLUMN name VARCHAR(100) NOT NULL,
+        MODIFY COLUMN email VARCHAR(100) NOT NULL,
+        MODIFY COLUMN gender VARCHAR(20) NULL,
+        MODIFY COLUMN business_name VARCHAR(100) NULL,
+        MODIFY COLUMN event_type_interest VARCHAR(50) NULL,
+        MODIFY COLUMN guest_count_est SMALLINT UNSIGNED NULL
+    ");
+
+    // 20c. Packages & Components: max_slots TINYINT UNSIGNED, names VARCHAR(80)
+    $db->exec("ALTER TABLE packages 
+        MODIFY COLUMN package_name VARCHAR(80) NOT NULL,
+        MODIFY COLUMN max_slots TINYINT UNSIGNED NOT NULL DEFAULT 5
+    ");
+    $db->exec("ALTER TABLE package_components 
+        MODIFY COLUMN name VARCHAR(80) NOT NULL
+    ");
+
+    // 20d. Venues: capacity SMALLINT UNSIGNED, venue_name VARCHAR(80), location VARCHAR(150)
+    $db->exec("ALTER TABLE venues 
+        MODIFY COLUMN venue_name VARCHAR(80) NOT NULL,
+        MODIFY COLUMN capacity SMALLINT UNSIGNED NULL,
+        MODIFY COLUMN location VARCHAR(150) NULL
+    ");
+
+    // 20e. Bookings: guest_count SMALLINT UNSIGNED, booking_reference VARCHAR(20)
+    $db->exec("ALTER TABLE bookings 
+        MODIFY COLUMN booking_reference VARCHAR(20) NULL,
+        MODIFY COLUMN guest_count SMALLINT UNSIGNED DEFAULT 1
+    ");
+
+    // 20f. Payments & Submissions: or_number VARCHAR(20), payment_method VARCHAR(20), reference_no VARCHAR(50)
+    $db->exec("ALTER TABLE payments 
+        MODIFY COLUMN or_number VARCHAR(20) NOT NULL,
+        MODIFY COLUMN payment_method VARCHAR(20) DEFAULT 'cash',
+        MODIFY COLUMN reference_no VARCHAR(50) NULL
+    ");
+    if (tableExists($db, 'payment_submissions')) {
+        $db->exec("ALTER TABLE payment_submissions 
+            MODIFY COLUMN payment_method VARCHAR(20) NOT NULL DEFAULT 'gcash',
+            MODIFY COLUMN reference_no VARCHAR(50) NOT NULL
+        ");
+    }
+
+    // 20g. Notifications & Audit Logs & Booking Images
+    if (tableExists($db, 'notifications')) {
+        $db->exec("ALTER TABLE notifications 
+            MODIFY COLUMN title VARCHAR(100) NOT NULL,
+            MODIFY COLUMN type VARCHAR(20) NOT NULL DEFAULT 'info'
+        ");
+    }
+    if (tableExists($db, 'booking_images')) {
+        $db->exec("ALTER TABLE booking_images 
+            MODIFY COLUMN mime_type VARCHAR(50) NOT NULL DEFAULT 'image/jpeg',
+            MODIFY COLUMN file_size INT UNSIGNED NOT NULL DEFAULT 0
+        ");
+    }
+
+    $results[] = [
+        'label' => 'Column Types & Variable Ranges Optimization',
+        'ok'    => true,
+        'msg'   => 'Optimized all column lengths and numeric ranges: mobile number strictly 11 digits (VARCHAR(11)), names (VARCHAR(50)), guest count & venue capacity (SMALLINT UNSIGNED), package slots (TINYINT UNSIGNED).'
+    ];
+} catch (PDOException $e) {
+    $results[] = [
+        'label' => 'Column Types & Variable Ranges Optimization',
+        'ok'    => false,
+        'msg'   => $e->getMessage()
+    ];
+}
+
+// ── 21. Drop audit_logs table (feature removed) ─────────────────────────────
+try {
+    $db->exec("DROP TABLE IF EXISTS audit_logs");
+    $results[] = ['label' => 'Drop audit_logs table', 'ok' => true, 'msg' => 'audit_logs table dropped successfully (feature removed).'];
+} catch (PDOException $e) {
+    $results[] = ['label' => 'Drop audit_logs table', 'ok' => false, 'msg' => $e->getMessage()];
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -615,6 +741,11 @@ if (columnExists($db, 'bookings', 'approved_by')) {
 
 <div class="warn">
   ⚠️ All setup tasks completed! Refresh <a href="http://localhost/crafthuborganizer/customer/packages.php">Customer Packages</a> to see your package cards with high quality photos!
+</div>
+<div style="margin-top:15px;display:flex;gap:10px;flex-wrap:wrap;">
+  <a href="http://localhost/crafthuborganizer/migrate_segregate_names.php" style="display:inline-block;background:#06b6d4;color:#fff;padding:10px 16px;text-decoration:none;border-radius:6px;font-weight:bold;">🔤 Name Segregation Tool</a>
+  <a href="http://localhost/crafthuborganizer/migrate_admin.php" style="display:inline-block;background:#8b5cf6;color:#fff;padding:10px 16px;text-decoration:none;border-radius:6px;font-weight:bold;">👤 Provision / Manage Admin Account</a>
+  <a href="http://localhost/crafthuborganizer/login.php" style="display:inline-block;background:#333;color:#fff;padding:10px 16px;text-decoration:none;border-radius:6px;">Go to Login</a>
 </div>
 </body>
 </html>

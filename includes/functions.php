@@ -56,6 +56,23 @@ function formatCurrency($amount): string {
 }
 
 // -----------------------------------------------
+//  Mobile Number Normalization & Validation
+//  Philippine standard: strictly 11 digits starting with 09 (e.g. 09XXXXXXXXX)
+// -----------------------------------------------
+function normalizeMobileNumber(string $number): string {
+    $cleaned = preg_replace('/[^0-9]/', '', trim($number));
+    if (str_starts_with($cleaned, '639') && strlen($cleaned) === 12) {
+        $cleaned = '0' . substr($cleaned, 2);
+    }
+    return $cleaned;
+}
+
+function isValidMobileNumber(string $number): bool {
+    $cleaned = normalizeMobileNumber($number);
+    return (bool)preg_match('/^09\d{9}$/', $cleaned);
+}
+
+// -----------------------------------------------
 //  Booking Reference Generator
 // -----------------------------------------------
 // -----------------------------------------------
@@ -105,22 +122,12 @@ function getBookingRef(array $b): string {
 }
 
 // -----------------------------------------------
-//  Audit Logging
+// -----------------------------------------------
+//  Audit Logging (Disabled / Removed)
 // -----------------------------------------------
 function logAudit(int $userId, string $action, string $description, string $table = ''): void {
-    try {
-        $db   = getDB();
-        $act  = $action . ($description ? ": $description" : "");
-        if ($userId > 0) {
-            $stmt = $db->prepare("INSERT INTO audit_logs (user_id, action, table_affected) VALUES (?, ?, ?)");
-            $stmt->execute([$userId, $act, $table]);
-        } else {
-            $stmt = $db->prepare("INSERT INTO audit_logs (action, table_affected) VALUES (?, ?)");
-            $stmt->execute([$act, $table]);
-        }
-    } catch (Exception $e) {
-        // Silent fail — audit logging should never break the app
-    }
+    // Audit log feature and database table have been removed
+    return;
 }
 
 // -----------------------------------------------
@@ -157,7 +164,9 @@ function statusBadge(?string $status): string {
 //  Date Formatting
 // -----------------------------------------------
 function formatDate(string $date): string {
-    return date('F j, Y', strtotime($date));
+    if (!$date) return '—';
+    $ts = strtotime($date);
+    return $ts !== false ? date('F j, Y', $ts) : '—';
 }
 
 function formatDateTime(string $dt): string {

@@ -27,7 +27,6 @@ if ($_SESSION['user_role'] === 'admin') {
         ['href' => APP_URL . '/admin/users.php',       'icon' => 'fa-users',               'label' => 'Users'],
         ['href' => APP_URL . '/admin/reviews.php',     'icon' => 'fa-star',               'label' => 'Reviews'],
         ['href' => APP_URL . '/admin/reports.php',     'icon' => 'fa-chart-bar',           'label' => 'Reports'],
-        ['href' => APP_URL . '/admin/audit.php',       'icon' => 'fa-shield-halved',       'label' => 'Audit Log'],
     ];
 
 } elseif ($_SESSION['user_role'] === 'staff' || $_SESSION['user_role'] === 'cashier') {

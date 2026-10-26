@@ -55,7 +55,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="form-group">
                     <label class="form-label" for="email">Email Address</label>
                     <input type="email" id="email" name="email" class="form-control"
-                           placeholder="you@example.com" required>
+                           maxlength="50" placeholder="you@example.com" required>
                 </div>
 
                 <button type="submit" class="btn btn-primary btn-block btn-lg">

@@ -16,7 +16,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $surname    = sanitize($_POST['surname']     ?? '');
         $name       = trim(implode(' ', array_filter([$firstName, $middleName, $surname])));
         $email      = sanitize($_POST['email']    ?? '');
-        $phone      = sanitize($_POST['phone']    ?? '');
+        $phone      = normalizeMobileNumber(sanitize($_POST['phone'] ?? ''));
         $address    = sanitize($_POST['address']  ?? '');
         $tempPass   = $_POST['password']          ?? '';
         $errors     = [];
@@ -24,6 +24,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$firstName) $errors[] = 'First name is required.';
         if (!$surname)   $errors[] = 'Surname is required.';
         if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = 'Valid email is required.';
+        if ($phone !== '' && !isValidMobileNumber($phone)) {
+            $errors[] = 'Phone number must be an 11-digit mobile number starting with 09 (e.g. 09171234567).';
+        }
         if (strlen($tempPass) < 6) $errors[] = 'Password must be at least 6 characters.';
 
         // Check email uniqueness
@@ -34,9 +37,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (empty($errors)) {
             $hash = password_hash($tempPass, PASSWORD_DEFAULT);
             // Staff creates customer account with status = 'inactive' (Pending Admin Approval)
-            $db->prepare("INSERT INTO users (name, email, password, contact_no, address, role, status)
-                          VALUES (?, ?, ?, ?, ?, 'customer', 'inactive')")
-               ->execute([$name, $email, $hash, $phone, $address]);
+            $db->prepare("INSERT INTO users (name, first_name, middle_name, last_name, surname, email, password, contact_no, address, role, status)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'customer', 'inactive')")
+               ->execute([$name, $firstName, $middleName, '', $surname, $email, $hash, $phone, $address]);
             $newId = (int)$db->lastInsertId();
 
             logAudit($staffId, 'STAFF_CREATE_CUSTOMER', "Staff registered customer account for {$email} (Pending Admin Approval)", 'users');
@@ -146,27 +149,29 @@ $customers = $db->query("
                 <div class="form-row" style="grid-template-columns:1fr 1fr;">
                     <div class="form-group">
                         <label class="form-label">First Name <span style="color:var(--accent-red);">*</span></label>
-                        <input type="text" name="first_name" id="custFirstName" class="form-control" placeholder="e.g. Maria" required>
+                        <input type="text" name="first_name" id="custFirstName" class="form-control" placeholder="e.g. Maria" maxlength="20" required>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Middle Name</label>
-                        <input type="text" name="middle_name" class="form-control" placeholder="e.g. Cruz">
+                        <input type="text" name="middle_name" class="form-control" placeholder="e.g. Cruz" maxlength="15">
                     </div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Surname <span style="color:var(--accent-red);">*</span></label>
-                    <input type="text" name="surname" id="custSurname" class="form-control" placeholder="e.g. Santos" required>
+                    <input type="text" name="surname" id="custSurname" class="form-control" placeholder="e.g. Santos" maxlength="20" required>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Email Address <span style="color:var(--accent-red);">*</span></label>
-                    <input type="email" name="email" id="custEmail" class="form-control" placeholder="mariasantos@crafthub.com" required>
+                    <input type="email" name="email" id="custEmail" class="form-control" placeholder="mariasantos@crafthub.com" maxlength="50" required>
                     <div class="form-hint" style="color:#4ecdc4;margin-top:4px;font-size:0.78rem;">
                         <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-fills as <strong>firstnamesurname@crafthub.com</strong>
                     </div>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Phone Number</label>
-                    <input type="tel" name="phone" class="form-control" placeholder="09XXXXXXXXX">
+                    <label class="form-label">Phone Number (11 digits)</label>
+                    <input type="tel" name="phone" class="form-control" placeholder="09XXXXXXXXX"
+                           maxlength="11" pattern="09[0-9]{9}" inputmode="numeric"
+                           title="11-digit Philippine mobile number starting with 09">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Address</label>

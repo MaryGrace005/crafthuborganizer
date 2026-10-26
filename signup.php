@@ -26,10 +26,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === '1') {
         $surname    = sanitize($_POST['surname']     ?? '');
         $name       = trim(implode(' ', array_filter([$firstName, $middleName, $surname])));
         $email      = sanitize($_POST['email']       ?? '');
-        $phone      = sanitize($_POST['phone']       ?? '');
+        $phone      = normalizeMobileNumber(sanitize($_POST['phone'] ?? ''));
         if (!$firstName) $errors[]       = 'First name is required.';
         if (!$surname)   $errors[]       = 'Surname is required.';
         if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = 'A valid email address is required.';
+        if ($phone !== '' && !isValidMobileNumber($phone)) {
+            $errors[] = 'Phone number must be an 11-digit mobile number starting with 09 (e.g. 09171234567).';
+        }
 
         if (empty($errors)) {
             // Check email uniqueness
@@ -44,8 +47,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['step'] ?? '') === '1') {
             // Auto-generate a secure random password (admin sets it later)
             $randomPassword = bin2hex(random_bytes(12));
             $hash = password_hash($randomPassword, PASSWORD_DEFAULT);
-            $db->prepare("INSERT INTO users (name, email, password, contact_no, role, status) VALUES (?, ?, ?, ?, 'customer', 'pending_approval')")
-               ->execute([$name, $email, $hash, $phone]);
+            $db->prepare("INSERT INTO users (name, first_name, middle_name, last_name, surname, email, password, contact_no, role, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'customer', 'pending_approval')")
+               ->execute([$name, $firstName, $middleName, $surname, $surname, $email, $hash, $phone]);
             $newUserId = (int)$db->lastInsertId();
 
             // Store in session for step 2
@@ -190,34 +193,37 @@ if ($urlStep === 2 && isset($_SESSION['signup_user_id'])) {
                     <div class="form-group">
                         <label class="form-label">First Name <span style="color:#e94560;">*</span></label>
                         <input type="text" name="first_name" id="signupFirstName" class="form-control" placeholder="Maria"
-                               value="<?= htmlspecialchars($_POST['first_name'] ?? '') ?>" required>
+                               maxlength="20" value="<?= htmlspecialchars($_POST['first_name'] ?? '') ?>" required>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Middle Name</label>
                         <input type="text" name="middle_name" class="form-control" placeholder="Optional"
-                               value="<?= htmlspecialchars($_POST['middle_name'] ?? '') ?>">
+                               maxlength="15" value="<?= htmlspecialchars($_POST['middle_name'] ?? '') ?>">
                     </div>
                 </div>
 
                 <div class="form-group">
                     <label class="form-label">Surname <span style="color:#e94560;">*</span></label>
                     <input type="text" name="surname" id="signupSurname" class="form-control" placeholder="Santos"
-                           value="<?= htmlspecialchars($_POST['surname'] ?? '') ?>" required>
+                           maxlength="20" value="<?= htmlspecialchars($_POST['surname'] ?? '') ?>" required>
                 </div>
 
                 <div class="form-group">
                     <label class="form-label">Email Address <span style="color:#e94560;">*</span></label>
                     <input type="email" name="email" id="signupEmail" class="form-control" placeholder="mariasantos@crafthub.com"
-                           value="<?= htmlspecialchars($_POST['email'] ?? '') ?>" required autocomplete="email">
+                           maxlength="50" value="<?= htmlspecialchars($_POST['email'] ?? '') ?>" required autocomplete="email">
                     <div class="form-hint" style="color:#4ecdc4;margin-top:4px;font-size:0.78rem;">
                         <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-fills as <strong>firstnamesurname@crafthub.com</strong>
                     </div>
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label">Phone Number</label>
-                    <input type="tel" name="phone" class="form-control" placeholder="09XXXXXXXXX"
+                    <label class="form-label">Phone Number (11 digits)</label>
+                    <input type="tel" name="phone" id="phone" class="form-control" placeholder="09XXXXXXXXX"
+                           maxlength="11" pattern="09[0-9]{9}" inputmode="numeric"
+                           title="Enter an 11-digit Philippine mobile number starting with 09 (e.g. 09171234567)"
                            value="<?= htmlspecialchars($_POST['phone'] ?? '') ?>">
+                    <div class="form-hint" style="color:rgba(255,255,255,0.45);font-size:0.75rem;margin-top:3px;">11 digits starting with 09 (e.g. 09171234567)</div>
                 </div>
 
 
