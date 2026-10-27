@@ -32,6 +32,12 @@ if (empty($dateFrom) || empty($dateTo)) {
             $dateFrom = date('Y-01-01');
             $dateTo   = date('Y-12-31');
             break;
+        case 'monthly_picker':
+            $month    = max(1, min(12, (int)($_GET['month'] ?? date('n'))));
+            $year     = max(2000, min(2100, (int)($_GET['year']  ?? date('Y'))));
+            $dateFrom = sprintf('%04d-%02d-01', $year, $month);
+            $dateTo   = date('Y-m-t', strtotime($dateFrom)); // last day of month
+            break;
         case 'monthly':
         default:
             $dateFrom = date('Y-m-01');

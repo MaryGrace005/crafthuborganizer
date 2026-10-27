@@ -94,10 +94,11 @@ requireRole(['admin']);
 }
 </style>
 
-<!-- Control Bar: Period Selection & Custom Dates -->
+<!-- Control Bar: Period Selection, Month/Year Picker & Custom Dates -->
 <div class="card" style="margin-bottom:24px;">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
-        <div style="display:flex;align-items:center;gap:8px;">
+        <!-- Period Tabs -->
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <button class="period-btn" data-period="weekly" onclick="setPeriod('weekly')">
                 <i class="fa-solid fa-calendar-week"></i> Weekly
             </button>
@@ -109,7 +110,38 @@ requireRole(['admin']);
             </button>
         </div>
 
-        <form id="customDateForm" onsubmit="applyCustomDates(event)" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <!-- Month & Year Picker -->
+        <form id="monthYearForm" onsubmit="applyMonthYear(event)" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span style="font-size:0.85rem;color:var(--text-muted);font-weight:600;"><i class="fa-solid fa-calendar-day"></i> Specific Month:</span>
+            <select id="pickerMonth" class="form-control" style="width:auto;padding:6px 12px;font-size:0.85rem;">
+                <option value="1">January</option>
+                <option value="2">February</option>
+                <option value="3">March</option>
+                <option value="4">April</option>
+                <option value="5">May</option>
+                <option value="6">June</option>
+                <option value="7">July</option>
+                <option value="8">August</option>
+                <option value="9">September</option>
+                <option value="10">October</option>
+                <option value="11">November</option>
+                <option value="12">December</option>
+            </select>
+            <select id="pickerYear" class="form-control" style="width:auto;padding:6px 12px;font-size:0.85rem;">
+<?php
+$currentYear = (int)date('Y');
+for ($y = $currentYear; $y >= $currentYear - 5; $y--) {
+    echo "                <option value=\"$y\">$y</option>\n";
+}
+?>
+            </select>
+            <button type="submit" class="btn btn-secondary btn-sm" style="height:36px;">
+                <i class="fa-solid fa-magnifying-glass"></i> View
+            </button>
+        </form>
+
+        <!-- Custom Date Range -->
+        <form id="customDateForm" onsubmit="applyCustomDates(event)" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <span style="font-size:0.85rem;color:var(--text-muted);font-weight:600;">Custom Range:</span>
             <input type="date" id="dateFrom" class="form-control" style="width:auto;padding:6px 12px;font-size:0.85rem;">
             <span style="color:var(--text-muted);">to</span>
@@ -214,6 +246,8 @@ requireRole(['admin']);
 let currentPeriod = 'monthly';
 let customFrom    = '';
 let customTo      = '';
+let pickerMonth   = '';
+let pickerYear    = '';
 let revenueChart, bookingsChart;
 
 // Helper: Format PHP Currency
@@ -224,6 +258,15 @@ function formatPHP(amount) {
 // Chart.js Theme Defaults
 Chart.defaults.color = '#a0a0c0';
 Chart.defaults.font.family = "'Outfit', sans-serif";
+
+// Pre-select current month and year in the dropdowns
+(function() {
+    const now = new Date();
+    const monthSel = document.getElementById('pickerMonth');
+    const yearSel  = document.getElementById('pickerYear');
+    if (monthSel) monthSel.value = now.getMonth() + 1;
+    if (yearSel)  yearSel.value  = now.getFullYear();
+})();
 
 function initCharts() {
     // 1. Revenue Line Chart
@@ -255,7 +298,9 @@ function initCharts() {
 
 function loadReportsData() {
     let url = '<?= APP_URL ?>/admin/reports_data.php?period=' + currentPeriod;
-    if (customFrom && customTo) {
+    if (currentPeriod === 'monthly_picker' && pickerMonth && pickerYear) {
+        url += '&month=' + pickerMonth + '&year=' + pickerYear;
+    } else if (customFrom && customTo) {
         url += '&from=' + customFrom + '&to=' + customTo;
     }
 
@@ -314,6 +359,7 @@ function loadReportsData() {
 function setPeriod(period) {
     currentPeriod = period;
     customFrom = ''; customTo = '';
+    pickerMonth = ''; pickerYear = '';
     document.querySelectorAll('.period-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.period === period);
     });
@@ -324,6 +370,19 @@ function applyCustomDates(e) {
     e.preventDefault();
     customFrom = document.getElementById('dateFrom').value;
     customTo   = document.getElementById('dateTo').value;
+    if (!customFrom || !customTo) return;
+    currentPeriod = 'monthly'; // use monthly grouping for custom range
+    pickerMonth = ''; pickerYear = '';
+    document.querySelectorAll('.period-btn').forEach(btn => btn.classList.remove('active'));
+    loadReportsData();
+}
+
+function applyMonthYear(e) {
+    e.preventDefault();
+    pickerMonth = document.getElementById('pickerMonth').value;
+    pickerYear  = document.getElementById('pickerYear').value;
+    currentPeriod = 'monthly_picker';
+    customFrom = ''; customTo = '';
     document.querySelectorAll('.period-btn').forEach(btn => btn.classList.remove('active'));
     loadReportsData();
 }
