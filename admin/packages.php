@@ -4,6 +4,8 @@ require_once __DIR__ . '/../includes/header.php';
 requireRole(['admin']);
 $db = getDB();
 ensureDiscountColumns($db);
+ensureSecurityDepositColumns($db);
+ensureExcessGuestColumns($db);
 
 // Handle POST actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -14,6 +16,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $desc                       = sanitize($_POST['description'] ?? '');
         $price                      = (float)($_POST['price']        ?? 0);
         $maxSlots                   = max(1, (int)($_POST['max_slots'] ?? 5));
+        $maxGuests                  = max(1, (int)($_POST['max_guests'] ?? 75));
+        $extraGuestPrice            = max(0.0, (float)($_POST['extra_guest_price'] ?? 75.00));
         $eventType                  = sanitize($_POST['event_type']  ?? 'Wedding');
         $imageUrl                   = sanitize($_POST['image_url']   ?? '');
         $status                     = in_array($_POST['status'] ?? '', ['active','inactive']) ? $_POST['status'] : 'active';
@@ -57,10 +61,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($action === 'add') {
             try {
-                $db->prepare("INSERT INTO packages (package_name, event_type, base_price, max_slots, description, image_url, status, full_payment_discount_percent, downpayment_discount_percent, downpayment_percent) VALUES (?,?,?,?,?,?,?,?,?,?)")
-                   ->execute([$name, $eventType, $price, $maxSlots, $desc, $imageUrl, $status, $fullDiscountPct, $downDiscountPct, $downPayPct]);
+                $db->prepare("INSERT INTO packages (package_name, event_type, base_price, max_slots, max_guests, extra_guest_price, description, image_url, status, full_payment_discount_percent, downpayment_discount_percent, downpayment_percent) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+                   ->execute([$name, $eventType, $price, $maxSlots, $maxGuests, $extraGuestPrice, $desc, $imageUrl, $status, $fullDiscountPct, $downDiscountPct, $downPayPct]);
             } catch (PDOException $e) {
-                // Fallback if image_url column doesn't exist yet
+                // Fallback if image_url or guest columns don't exist yet
                 $db->prepare("INSERT INTO packages (package_name, event_type, base_price, max_slots, description, status) VALUES (?,?,?,?,?,?)")
                    ->execute([$name, $eventType, $price, $maxSlots, $desc, $status]);
             }
@@ -70,8 +74,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $packageId = (int)($_POST['id'] ?? 0);
             try {
-                $db->prepare("UPDATE packages SET package_name=?, event_type=?, base_price=?, max_slots=?, description=?, image_url=?, status=?, full_payment_discount_percent=?, downpayment_discount_percent=?, downpayment_percent=? WHERE package_id=?")
-                   ->execute([$name, $eventType, $price, $maxSlots, $desc, $imageUrl, $status, $fullDiscountPct, $downDiscountPct, $downPayPct, $packageId]);
+                $db->prepare("UPDATE packages SET package_name=?, event_type=?, base_price=?, max_slots=?, max_guests=?, extra_guest_price=?, description=?, image_url=?, status=?, full_payment_discount_percent=?, downpayment_discount_percent=?, downpayment_percent=? WHERE package_id=?")
+                   ->execute([$name, $eventType, $price, $maxSlots, $maxGuests, $extraGuestPrice, $desc, $imageUrl, $status, $fullDiscountPct, $downDiscountPct, $downPayPct, $packageId]);
             } catch (PDOException $e) {
                 $db->prepare("UPDATE packages SET package_name=?, event_type=?, base_price=?, max_slots=?, description=?, status=? WHERE package_id=?")
                    ->execute([$name, $eventType, $price, $maxSlots, $desc, $status, $packageId]);
@@ -465,7 +469,11 @@ unset($p);
                     </td>
                     <td>
                         <div style="font-weight:600;"><?= htmlspecialchars($p['name']) ?></div>
-                        <div style="font-size:0.78rem;color:var(--text-secondary);"><?= htmlspecialchars(substr($p['description'] ?? '',0,50)) ?><?= strlen($p['description'] ?? '') > 50 ? '...' : '' ?></div>
+                        <div style="font-size:0.75rem;color:var(--accent-teal);margin-top:3px;">
+                            <i class="fa-solid fa-users"></i> Up to <?= (int)($p['max_guests'] ?? 75) ?> guests
+                            <span style="color:var(--accent-gold);margin-left:4px;">(+<?= formatCurrency($p['extra_guest_price'] ?? 75) ?>/head extra)</span>
+                        </div>
+                        <div style="font-size:0.78rem;color:var(--text-secondary);margin-top:2px;"><?= htmlspecialchars(substr($p['description'] ?? '',0,50)) ?><?= strlen($p['description'] ?? '') > 50 ? '...' : '' ?></div>
                     </td>
                     <td><span class="badge badge-info"><?= htmlspecialchars($p['event_type'] ?? 'Wedding') ?></span></td>
                     <td>
@@ -528,6 +536,8 @@ unset($p);
                                     'event_type'                     => $p['event_type'] ?? 'Wedding',
                                     'price'                          => $p['price'],
                                     'max_slots'                      => $p['max_slots'],
+                                    'max_guests'                     => (int)($p['max_guests'] ?? 75),
+                                    'extra_guest_price'              => (float)($p['extra_guest_price'] ?? 75.00),
                                     'image_url'                      => $p['image_url'] ?? '',
                                     'description'                    => $p['description'],
                                     'status'                         => $p['status'],
@@ -594,6 +604,22 @@ unset($p);
                             <option value="active" selected>Active</option>
                             <option value="inactive">Inactive</option>
                         </select>
+                    </div>
+                </div>
+                <!-- Guest Capacity & Excess Guest Add-On Settings -->
+                <div style="background:rgba(78,205,196,0.06);border:1px solid rgba(78,205,196,0.25);border-radius:12px;padding:14px 16px;margin-bottom:14px;">
+                    <div style="font-size:0.78rem;font-weight:800;color:var(--accent-teal);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px;"><i class="fa-solid fa-users"></i> Guest Capacity &amp; Excess Guest Pricing</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Base Included Guests <span style="color:var(--accent-red);">*</span></label>
+                            <input type="number" name="max_guests" class="form-control" min="1" max="1000" value="75" placeholder="e.g. 75" required>
+                            <div class="form-hint">Number of guests included in the package base price.</div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Extra Guest Price (₱/head) <span style="color:var(--accent-red);">*</span></label>
+                            <input type="number" name="extra_guest_price" class="form-control" step="0.01" min="0" value="75.00" placeholder="e.g. 75.00 (₱50-100)" required>
+                            <div class="form-hint">Price per head if client's guest count exceeds package limit.</div>
+                        </div>
                     </div>
                 </div>
                 <!-- Discount Configuration -->
@@ -696,6 +722,22 @@ Decoration: Floral & Table Backdrop"></textarea>
                             <option value="active">Active</option>
                             <option value="inactive">Inactive</option>
                         </select>
+                    </div>
+                </div>
+                <!-- Guest Capacity & Excess Guest Add-On Settings -->
+                <div style="background:rgba(78,205,196,0.06);border:1px solid rgba(78,205,196,0.25);border-radius:12px;padding:14px 16px;margin-bottom:14px;">
+                    <div style="font-size:0.78rem;font-weight:800;color:var(--accent-teal);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px;"><i class="fa-solid fa-users"></i> Guest Capacity &amp; Excess Guest Pricing</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Base Included Guests <span style="color:var(--accent-red);">*</span></label>
+                            <input type="number" name="max_guests" class="form-control" min="1" max="1000" placeholder="e.g. 75" required>
+                            <div class="form-hint">Number of guests included in the package base price.</div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Extra Guest Price (₱/head) <span style="color:var(--accent-red);">*</span></label>
+                            <input type="number" name="extra_guest_price" class="form-control" step="0.01" min="0" placeholder="e.g. 75.00 (₱50-100)" required>
+                            <div class="form-hint">Price per head if client's guest count exceeds package limit.</div>
+                        </div>
                     </div>
                 </div>
                 <!-- Discount Configuration -->

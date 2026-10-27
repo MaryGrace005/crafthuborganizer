@@ -25,17 +25,12 @@ $amountPaid  = round((float)($booking['amount_paid'] ?? 0), 2);
 $totalAmount = round((float)($booking['total_amount'] ?? 0), 2);
 $balance     = round(max(0.0, $totalAmount - $amountPaid), 2);
 
-if (strtolower($booking['status'] ?? '') === 'pending') {
-    setFlash('warning', 'Cannot collect payment: Booking #' . getBookingRef($booking) . ' is still Pending. It must be approved by the cashier before payment can be collected.');
-    redirect($returnUrl);
-}
-
 if (strtolower($booking['status'] ?? '') === 'cancelled') {
     setFlash('error', 'Cannot collect payment: This booking has been cancelled.');
     redirect($returnUrl);
 }
 
-if (($booking['status'] ?? '') === 'Paid' || ($balance <= 0 && $totalAmount > 0)) {
+if (strtolower($booking['status'] ?? '') === 'paid' || ($balance <= 0 && $totalAmount > 0)) {
     setFlash('info', 'This booking is already fully paid.');
     redirect($returnUrl);
 }
@@ -53,9 +48,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $freshCheck->execute([$bookingId]);
     $freshStatus = $freshCheck->fetchColumn();
 
-    if (strtolower($freshStatus) === 'pending') {
-        $errors[] = 'Cannot collect payment: Booking is still Pending. It must be approved by the cashier first.';
-    }
     if (strtolower($freshStatus) === 'cancelled') {
         $errors[] = 'Cannot collect payment: This booking has been cancelled.';
     }
@@ -95,6 +87,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $upd->execute([$amount, $bookingId]);
             } catch (PDOException $e) {
                 // Ignore if amount_paid column doesn't exist
+            }
+
+            if (strtolower($freshStatus ?? '') === 'pending') {
+                ensureApprovalColumns($db);
+                $db->prepare("UPDATE bookings SET status = 'Confirmed', approved_at = NOW(), approved_by = ? WHERE booking_id = ?")
+                   ->execute([$staffId, $bookingId]);
             }
 
             updateBookingPaymentStatus($bookingId);
@@ -220,10 +218,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="flex-between"><span style="color:var(--text-secondary);">Package</span> <strong><?= htmlspecialchars($booking['package_name']) ?></strong></div>
                 <div class="flex-between"><span style="color:var(--text-secondary);">Venue</span> <span><?= htmlspecialchars($booking['venue_name'] ?? '—') ?></span></div>
                 <div class="flex-between"><span style="color:var(--text-secondary);">Event Date</span> <span><?= formatDate($booking['event_date']) ?></span></div>
+                <div class="flex-between"><span style="color:var(--text-secondary);">Total Guests</span> <strong><?= (int)($booking['guest_count'] ?? 1) ?> guests</strong></div>
+                <?php if ((float)($booking['excess_guest_fee'] ?? 0) > 0): ?>
+                    <div class="flex-between" style="background:rgba(245,166,35,0.08);padding:6px 10px;border-radius:8px;border:1px solid rgba(245,166,35,0.25);">
+                        <span style="color:#f5a623;font-size:0.82rem;">
+                            <i class="fa-solid fa-user-plus"></i> Excess Guests Add-On (+<?= (int)$booking['excess_guests'] ?> @ <?= formatCurrency($booking['per_guest_fee'] ?? 75) ?>)
+                        </span>
+                        <strong style="color:#f5a623;">+<?= formatCurrency($booking['excess_guest_fee']) ?></strong>
+                    </div>
+                <?php endif; ?>
                 <hr style="border-color:var(--border-color);">
                 <div class="flex-between"><span style="color:var(--text-secondary);">Total Amount</span> <strong style="color:var(--accent-gold);"><?= formatCurrency($booking['total_amount']) ?></strong></div>
                 <div class="flex-between"><span style="color:var(--text-secondary);">Amount Paid</span> <strong style="color:#27ae60;"><?= formatCurrency($booking['amount_paid']) ?></strong></div>
                 <div class="flex-between" style="border-top:1px solid var(--border-color);padding-top:10px;"><span style="color:var(--text-secondary);">Balance</span> <strong style="color:var(--accent-red);font-size:1.1rem;"><?= formatCurrency($balance) ?></strong></div>
+                <hr style="border-color:var(--border-color);">
+                <?php
+                $depAmt = (float)($booking['security_deposit'] ?? 0);
+                $depSt  = $booking['deposit_status'] ?? 'held';
+                $depLabels = ['held'=>'Held (Refundable)','returned'=>'Returned (No Damage)','forfeited'=>'Forfeited (Damage)'];
+                $depColors = ['held'=>'#f5a623','returned'=>'#27ae60','forfeited'=>'#e94560'];
+                ?>
+                <div class="flex-between">
+                    <span style="color:var(--text-secondary);"><i class="fa-solid fa-shield-halved" style="color:#a78bfa;"></i> Security Deposit</span>
+                    <strong style="color:#a78bfa;"><?= formatCurrency($depAmt) ?></strong>
+                </div>
+                <div class="flex-between">
+                    <span style="color:var(--text-secondary);">Deposit Status</span>
+                    <span style="font-size:0.78rem;font-weight:700;color:<?= $depColors[$depSt] ?? '#aaa' ?>;background:<?= ($depColors[$depSt] ?? '#aaa') ?>18;padding:2px 8px;border-radius:20px;border:1px solid <?= ($depColors[$depSt] ?? '#aaa') ?>44;">
+                        <?= $depLabels[$depSt] ?? ucfirst($depSt) ?>
+                    </span>
+                </div>
+                <div style="font-size:0.73rem;color:var(--text-muted);margin-top:2px;line-height:1.4;">
+                    <i class="fa-solid fa-circle-info" style="color:#a78bfa;"></i> The security deposit is refundable back to the customer after the event if no damage is incurred.
+                </div>
             </div>
         </div>
 

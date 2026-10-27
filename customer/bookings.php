@@ -10,6 +10,8 @@ $userId = $user['user_id'] ?? $user['id'];
 
 // Auto-sync: mark past bookings as Completed/Cancelled in real-time
 syncPastBookingsAndSlots($db);
+ensureSecurityDepositColumns($db);
+ensureExcessGuestColumns($db);
 
 // ── Handle Payment Proof Upload POST ─────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'submit_payment_proof') {
@@ -180,6 +182,13 @@ $bookings = $stmt->fetchAll();
                         <td style="white-space:nowrap;">
                             <div style="font-weight:600;"><?= htmlspecialchars($b['package_name']) ?></div>
                             <div style="font-size:0.78rem;color:var(--text-secondary);"><?= htmlspecialchars($b['venue_name'] ?? 'No Venue') ?></div>
+                            <div style="font-size:0.73rem;color:var(--text-muted);margin-top:2px;"><i class="fa-solid fa-users"></i> <?= (int)($b['guest_count'] ?? 1) ?> guests</div>
+                            <?php if ((float)($b['excess_guest_fee'] ?? 0) > 0): ?>
+                                <div style="font-size:0.71rem;color:#f39c12;margin-top:2px;display:flex;align-items:center;gap:3px;" title="<?= (int)$b['excess_guests'] ?> excess guest(s) @ ₱<?= number_format((float)($b['per_guest_fee'] ?? 0), 2) ?>">
+                                    <i class="fa-solid fa-user-plus" style="font-size:0.65rem;"></i>
+                                    <span>+<?= (int)$b['excess_guests'] ?> excess (+₱<?= number_format((float)$b['excess_guest_fee'], 0) ?>)</span>
+                                </div>
+                            <?php endif; ?>
                         </td>
                         <td style="white-space:nowrap;">
                             <div style="font-weight:500;"><?= formatDate($b['event_date']) ?></div>
@@ -194,9 +203,24 @@ $bookings = $stmt->fetchAll();
                                     </span>
                                 </div>
                             <?php endif; ?>
+                            <?php if ((float)($b['excess_guest_fee'] ?? 0) > 0): ?>
+                                <div style="font-size:0.68rem;color:#f39c12;margin-top:2px;">
+                                    <i class="fa-solid fa-user-plus"></i> incl. ₱<?= number_format((float)$b['excess_guest_fee'], 0) ?> excess
+                                </div>
+                            <?php endif; ?>
                             <?php if ((float)($b['discount_amount'] ?? 0) > 0): ?>
                                 <div style="font-size:0.7rem;color:#2ecc71;margin-top:2px;">
                                     <i class="fa-solid fa-tag"></i> Saved <?= formatCurrency($b['discount_amount']) ?>
+                                </div>
+                            <?php endif; ?>
+                            <?php if ((float)($b['security_deposit'] ?? 0) > 0): 
+                                $depSt = $b['deposit_status'] ?? 'held';
+                                $depColors = ['held'=>'#f5a623','returned'=>'#27ae60','forfeited'=>'#e94560'];
+                                $depTexts  = ['held'=>'Deposit Held (Refundable)','returned'=>'Deposit Returned ✓','forfeited'=>'Deposit Forfeited'];
+                                $dClr = $depColors[$depSt] ?? '#aaa';
+                            ?>
+                                <div style="font-size:0.68rem;color:<?= $dClr ?>;margin-top:3px;display:flex;align-items:center;gap:3px;" title="<?= $depSt==='returned' ? 'Deposit was returned back to you because no damage occurred' : 'Refundable deposit returned after event if no damage' ?>">
+                                    <i class="fa-solid fa-shield-halved"></i> <?= formatCurrency($b['security_deposit']) ?> <?= $depTexts[$depSt] ?? ucfirst($depSt) ?>
                                 </div>
                             <?php endif; ?>
                         </td>
@@ -240,18 +264,11 @@ $bookings = $stmt->fetchAll();
                                     <i class="fa-solid fa-file-invoice"></i> SOA
                                 </a>
 
-                                <?php if ($balance > 0 && in_array(strtolower($b['status']), ['confirmed','paid'])): ?>
-                                    <!-- Dedicated Submit Payment Page -->
+                                <?php if ($balance > 0 && strtolower($b['status']) !== 'cancelled'): ?>
                                     <a href="<?= APP_URL ?>/customer/submit_payment.php?id=<?= $b['id'] ?>"
-                                       class="btn btn-warning btn-sm" style="white-space:nowrap;" title="Submit Online Payment Proof">
-                                        <i class="fa-solid fa-money-bill-transfer"></i> Pay Online
+                                       class="btn btn-warning btn-sm" style="white-space:nowrap;font-weight:700;" title="Submit Online Payment Proof">
+                                        <i class="fa-solid fa-money-bill-transfer"></i> <?= strtolower($b['status']) === 'pending' ? 'Pay to Confirm' : 'Pay Online' ?>
                                     </a>
-                                <?php elseif ($balance > 0 && strtolower($b['status']) !== 'cancelled'): ?>
-                                    <button type="button" class="btn btn-warning btn-sm"
-                                            onclick="openPayProofModal(<?= $b['id'] ?>, '<?= htmlspecialchars(addslashes(getBookingRef($b))) ?>', <?= $balance ?>)"
-                                            style="white-space:nowrap;" title="Upload GCash / Bank Transfer Proof">
-                                        <i class="fa-solid fa-upload"></i> Pay Proof
-                                    </button>
                                 <?php endif; ?>
 
                                 <a href="<?= APP_URL ?>/booking_images.php?booking_id=<?= $b['id'] ?>" class="btn btn-secondary btn-sm" style="white-space:nowrap;" title="View &amp; Upload Event Photos">

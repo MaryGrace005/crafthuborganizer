@@ -8,14 +8,33 @@ $stats = getDashboardStats('staff', $user['id']);
 $db    = getDB();
 $userId = $user['user_id'] ?? $user['id'];
 
-// Handle quick-approve from dashboard (approve only)
+// Handle quick-approve from dashboard (approve only allowed if payment received)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'approve_booking') {
     $bookingId = (int)($_POST['booking_id'] ?? 0);
-    $chk = $db->prepare("SELECT b.*, u.name AS customer_name FROM bookings b JOIN users u ON b.customer_id = u.user_id WHERE b.booking_id = ?");
+    $chk = $db->prepare("
+        SELECT b.*, u.name AS customer_name,
+               (SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE booking_id = b.booking_id) AS total_paid,
+               (SELECT COUNT(*) FROM payment_submissions WHERE booking_id = b.booking_id AND status = 'pending') AS pending_submissions
+        FROM bookings b 
+        JOIN users u ON b.customer_id = u.user_id 
+        WHERE b.booking_id = ?
+    ");
     $chk->execute([$bookingId]);
     $bk = $chk->fetch();
     if ($bk) {
         $ref = getBookingRef($bk);
+        $paidSoFar = (float)$bk['total_paid'];
+        $hasPendingProof = (int)$bk['pending_submissions'] > 0;
+
+        if ($paidSoFar <= 0.005) {
+            if ($hasPendingProof) {
+                setFlash('warning', "Payment proof awaiting verification! Review and approve in <a href='" . APP_URL . "/staff/payment_submissions.php' style='color:#fff;text-decoration:underline;font-weight:700;'>Payment Submissions</a> to confirm this booking.");
+            } else {
+                setFlash('error', "Cannot approve booking <strong>{$ref}</strong>: Client must make a payment first before this booking can be approved. Please collect payment via <a href='" . APP_URL . "/staff/bills.php' style='color:#fff;text-decoration:underline;font-weight:700;'>Bills</a>.");
+            }
+            redirect(APP_URL . '/staff/dashboard.php');
+        }
+
         ensureApprovalColumns($db);
         $now = date('Y-m-d H:i:s');
         $db->prepare("UPDATE bookings SET status = 'Confirmed', approved_at = ?, approved_by = ? WHERE booking_id = ?")
@@ -24,14 +43,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'appro
 
         $timeFormatted = date('M d, Y g:i A', strtotime($now));
         logAudit($userId, 'APPROVE_BOOKING', "Cashier approved booking #{$bookingId} ({$ref}) on {$timeFormatted} from Dashboard", 'bookings');
-        setFlash('success', "✓ Booking <strong>{$ref}</strong> approved on <strong>{$timeFormatted}</strong>! Payment can now be collected.");
+        setFlash('success', "✓ Booking <strong>{$ref}</strong> verified &amp; approved on <strong>{$timeFormatted}</strong>!");
     }
     redirect(APP_URL . '/staff/dashboard.php');
 }
 
 // Pending customer bookings awaiting cashier approval
 $pendingBookings = $db->query("
-    SELECT b.*, b.booking_id AS id, u.name AS customer_name, u.email AS customer_email, p.package_name, v.venue_name
+    SELECT b.*, b.booking_id AS id, u.name AS customer_name, u.email AS customer_email, p.package_name, v.venue_name,
+           COALESCE((SELECT SUM(py.amount_paid) FROM payments py WHERE py.booking_id = b.booking_id), 0) AS real_amount_paid,
+           (SELECT COUNT(*) FROM payment_submissions ps WHERE ps.booking_id = b.booking_id AND ps.status = 'pending') AS pending_submissions
     FROM bookings b
     JOIN users u ON b.customer_id = u.user_id
     JOIN packages p ON b.package_id = p.package_id
@@ -192,14 +213,28 @@ try {
                 <div style="font-weight:800;color:var(--accent-gold);font-size:0.95rem;">
                     <?= formatCurrency($pb['total_amount']) ?>
                 </div>
-                <form method="POST" style="margin:0;">
-                    <input type="hidden" name="action" value="approve_booking">
-                    <input type="hidden" name="booking_id" value="<?= $pb['id'] ?>">
-                    <button type="submit" class="btn btn-success btn-sm" style="font-weight:700;padding:6px 14px;"
-                            onclick="return confirm('Approve booking <?= htmlspecialchars(addslashes($pbRef)) ?> for <?= htmlspecialchars(addslashes($pb['customer_name'])) ?>?')">
-                        <i class="fa-solid fa-check"></i> Approve
-                    </button>
-                </form>
+                <?php
+                $pbPaid = (float)($pb['real_amount_paid'] ?? 0);
+                $pbHasProof = (int)($pb['pending_submissions'] ?? 0) > 0;
+                ?>
+                <?php if ($pbPaid > 0): ?>
+                    <form method="POST" style="margin:0;">
+                        <input type="hidden" name="action" value="approve_booking">
+                        <input type="hidden" name="booking_id" value="<?= $pb['id'] ?>">
+                        <button type="submit" class="btn btn-success btn-sm" style="font-weight:700;padding:6px 14px;"
+                                onclick="return confirm('Approve booking <?= htmlspecialchars(addslashes($pbRef)) ?> for <?= htmlspecialchars(addslashes($pb['customer_name'])) ?>?')">
+                            <i class="fa-solid fa-check"></i> Approve
+                        </button>
+                    </form>
+                <?php elseif ($pbHasProof): ?>
+                    <a href="<?= APP_URL ?>/staff/payment_submissions.php" class="btn btn-warning btn-sm" style="font-weight:700;padding:6px 14px;white-space:nowrap;">
+                        <i class="fa-solid fa-receipt"></i> Review Proof
+                    </a>
+                <?php else: ?>
+                    <a href="<?= APP_URL ?>/staff/bills.php?pay_booking_id=<?= $pb['id'] ?>" class="btn btn-success btn-sm" style="font-weight:700;padding:6px 14px;white-space:nowrap;background:linear-gradient(135deg, #27ae60 0%, #219653 100%);border-color:#27ae60;">
+                        <i class="fa-solid fa-cash-register"></i> Collect &amp; Approve
+                    </a>
+                <?php endif; ?>
             </div>
         </div>
         <?php endforeach; ?>

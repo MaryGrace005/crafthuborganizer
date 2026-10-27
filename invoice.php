@@ -14,6 +14,7 @@ if (!isLoggedIn()) {
 }
 
 $db        = getDB();
+ensureExcessGuestColumns($db);
 $user      = getCurrentUser();
 $userId    = (int)($user['user_id'] ?? $user['id'] ?? 0);
 $role      = $_SESSION['user_role'] ?? 'customer';
@@ -265,11 +266,23 @@ tr:last-child td { border-bottom: none; }
                 <tr>
                     <td>
                         <strong><?= htmlspecialchars($booking['package_name']) ?></strong>
-                        <div style="font-size:0.78rem;color:#888;margin-top:2px;">Base Package</div>
+                        <div style="font-size:0.78rem;color:#888;margin-top:2px;">Base Package (includes up to <?= (int)($booking['package_guest_limit'] ?? 50) ?> guests)</div>
                     </td>
                     <td><span style="background:#e8eef8;color:#3a5aad;padding:2px 8px;border-radius:20px;font-size:0.72rem;font-weight:700;">Package</span></td>
                     <td class="amount-right">₱<?= number_format((float)$booking['base_price'], 2) ?></td>
                 </tr>
+                <?php if ((float)($booking['excess_guest_fee'] ?? 0) > 0): ?>
+                <tr style="background:#fffcf5;">
+                    <td>
+                        <strong style="color:#c67c00;"><i class="fa-solid fa-user-plus" style="font-size:0.8rem;margin-right:4px;"></i> Excess Guests Add-On</strong>
+                        <div style="font-size:0.78rem;color:#888;margin-top:2px;">
+                            +<?= (int)$booking['excess_guests'] ?> extra guests @ ₱<?= number_format((float)($booking['per_guest_fee'] ?? 75), 2) ?>/head (Total attendees: <?= (int)$booking['guest_count'] ?>)
+                        </div>
+                    </td>
+                    <td><span style="background:#fff4e5;color:#c67c00;padding:2px 8px;border-radius:20px;font-size:0.72rem;font-weight:700;">Add-on</span></td>
+                    <td class="amount-right" style="color:#c67c00;font-weight:700;">+₱<?= number_format((float)$booking['excess_guest_fee'], 2) ?></td>
+                </tr>
+                <?php endif; ?>
                 <?php foreach ($addons as $addon): ?>
                 <tr>
                     <td>
@@ -336,6 +349,41 @@ tr:last-child td { border-bottom: none; }
                 <div class="summary-lbl"><?= $balance > 0 ? 'Outstanding Balance' : '✅ Fully Paid' ?></div>
             </div>
         </div>
+
+        <!-- Security Deposit & Refund Policy -->
+        <?php
+        $secDep    = (float)($booking['security_deposit'] ?? 0);
+        $depSt     = $booking['deposit_status'] ?? 'held';
+        $depLabels = ['held'=>'Held (Refundable)','returned'=>'Returned to Customer (No Damage)','forfeited'=>'Forfeited (Damage Incurred)'];
+        $depColors = ['held'=>'#f5a623','returned'=>'#27ae60','forfeited'=>'#e94560'];
+        $depBg     = ['held'=>'#fffdf5','returned'=>'#f4fbf7','forfeited'=>'#fdf4f5'];
+        $depBd     = ['held'=>'rgba(245,166,35,0.3)','returned'=>'rgba(39,174,96,0.3)','forfeited'=>'rgba(233,69,96,0.3)'];
+        ?>
+        <?php if ($secDep > 0): ?>
+        <div style="background:<?= $depBg[$depSt] ?? '#fff' ?>;border:1px solid <?= $depBd[$depSt] ?? '#ddd' ?>;border-radius:12px;padding:16px 20px;margin-bottom:24px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+                <div>
+                    <div style="font-size:0.75rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:<?= $depColors[$depSt] ?? '#555' ?>;">
+                        🛡 Refundable Security Deposit
+                    </div>
+                    <div style="font-size:1.15rem;font-weight:800;color:#1a1a2e;margin-top:2px;">
+                        ₱<?= number_format($secDep, 2) ?>
+                        <span style="display:inline-block;margin-left:8px;font-size:0.75rem;font-weight:700;color:<?= $depColors[$depSt] ?? '#555' ?>;background:<?= $depColors[$depSt] ?? '#555' ?>18;border:1px solid <?= $depColors[$depSt] ?? '#555' ?>44;padding:2px 10px;border-radius:20px;">
+                            <?= $depLabels[$depSt] ?? ucfirst($depSt) ?>
+                        </span>
+                    </div>
+                </div>
+                <div style="font-size:0.82rem;color:#555;max-width:440px;line-height:1.45;">
+                    <strong style="color:#222;">Deposit &amp; Damage Terms:</strong> If no damage occurs to the venue or equipment, the security deposit is <strong>fully refunded back to the customer</strong> after event inspection.
+                    <?php if (!empty($booking['deposit_note'])): ?>
+                    <div style="margin-top:5px;font-style:italic;color:#333;background:rgba(0,0,0,0.03);padding:4px 8px;border-radius:6px;">
+                        <strong>Audit Note:</strong> <?= htmlspecialchars($booking['deposit_note']) ?>
+                    </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
 
         <!-- Payment History -->
         <?php if (!empty($payments)): ?>

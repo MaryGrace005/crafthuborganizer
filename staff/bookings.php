@@ -8,6 +8,7 @@ requireRole(['staff', 'cashier']);
 
 $db        = getDB();
 ensureApprovalColumns($db);
+ensureExcessGuestColumns($db);
 $cashierId = $_SESSION['user_id'] ?? 0;
 
 // Auto-sync: mark past bookings as Completed/Cancelled in real-time
@@ -31,6 +32,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect(APP_URL . '/staff/bookings.php');
         } else {
             $ref = getBookingRef($booking);
+
+            $paidChk = $db->prepare("SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE booking_id = ?");
+            $paidChk->execute([$id]);
+            $paidSoFar = (float)$paidChk->fetchColumn();
+
+            $subChk = $db->prepare("SELECT COUNT(*) FROM payment_submissions WHERE booking_id = ? AND status = 'pending'");
+            $subChk->execute([$id]);
+            $hasPendingProof = (int)$subChk->fetchColumn() > 0;
+
+            if ($paidSoFar <= 0.005) {
+                if ($hasPendingProof) {
+                    setFlash('warning', "Payment proof awaiting verification! Review and approve in <a href='" . APP_URL . "/staff/payment_submissions.php' style='color:#fff;text-decoration:underline;font-weight:700;'>Payment Submissions</a> to confirm this booking.");
+                } else {
+                    setFlash('error', "Cannot approve booking <strong>{$ref}</strong>: Client must make a payment first before this booking can be approved. Please collect payment in <a href='" . APP_URL . "/staff/bills.php' style='color:#fff;text-decoration:underline;font-weight:700;'>Bills</a>.");
+                }
+                redirect(APP_URL . '/staff/bookings.php');
+            }
+
             ensureApprovalColumns($db);
             $now = date('Y-m-d H:i:s');
             $stmt = $db->prepare("UPDATE bookings SET status = 'Confirmed', approved_at = ?, approved_by = ? WHERE booking_id = ?");
@@ -44,7 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             createNotification(
                 (int)$booking['customer_id'],
                 "Booking Confirmed!",
-                "Great news! Your booking #{$ref} for {$booking['package_name']} has been approved. You can now view your Billing Statement / Invoice.",
+                "Great news! Your booking #{$ref} for {$booking['package_name']} has been approved & verified. You can now view your Billing Statement / Invoice.",
                 "success",
                 APP_URL . "/invoice.php?id={$id}"
             );
@@ -53,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             require_once __DIR__ . '/../includes/mailer.php';
             @sendBookingConfirmationEmail($id);
 
-            setFlash('success', "✓ Booking <strong>{$ref}</strong> approved on <strong>{$timeFormatted}</strong>! You can now collect payment.");
+            setFlash('success', "✓ Booking <strong>{$ref}</strong> verified &amp; approved on <strong>{$timeFormatted}</strong>!");
             redirect(APP_URL . '/staff/bookings.php');
         }
     }
@@ -128,7 +147,8 @@ $sql = "
            p.package_name,
            v.venue_name,
            COALESCE((SELECT SUM(py.amount_paid) FROM payments py WHERE py.booking_id = b.booking_id), 0) AS real_amount_paid,
-           (SELECT MAX(py.payment_id) FROM payments py WHERE py.booking_id = b.booking_id) AS latest_payment_id
+           (SELECT MAX(py.payment_id) FROM payments py WHERE py.booking_id = b.booking_id) AS latest_payment_id,
+           (SELECT COUNT(*) FROM payment_submissions ps WHERE ps.booking_id = b.booking_id AND ps.status = 'pending') AS pending_submissions
     FROM bookings b
     JOIN users    u ON b.customer_id = u.user_id
     JOIN packages p ON b.package_id  = p.package_id
@@ -361,6 +381,12 @@ $bookings = $stmt->fetchAll();
                     <td>
                         <div style="font-weight:600;"><?= htmlspecialchars($b['package_name']) ?></div>
                         <div style="font-size:0.75rem;color:var(--text-muted);"><i class="fa-solid fa-users"></i> <?= (int)($b['guest_count'] ?? 1) ?> guests</div>
+                        <?php if ((float)($b['excess_guest_fee'] ?? 0) > 0): ?>
+                            <div style="font-size:0.71rem;color:#f39c12;margin-top:2px;display:flex;align-items:center;gap:3px;" title="<?= (int)$b['excess_guests'] ?> excess guest(s) @ ₱<?= number_format((float)($b['per_guest_fee'] ?? 0), 2) ?>">
+                                <i class="fa-solid fa-user-plus" style="font-size:0.65rem;"></i>
+                                <span>+<?= (int)($b['excess_guests'] ?? 0) ?> excess (+₱<?= number_format((float)$b['excess_guest_fee'], 0) ?>)</span>
+                            </div>
+                        <?php endif; ?>
                     </td>
                     <td><?= htmlspecialchars($b['venue_name'] ?? 'No Venue') ?></td>
                     <td style="white-space:nowrap;">
@@ -378,6 +404,11 @@ $bookings = $stmt->fetchAll();
                                 <span class="badge" style="font-size:0.68rem;padding:2px 6px;background:<?= $b['payment_plan'] === 'full' ? 'rgba(46,204,113,0.15)' : 'rgba(78,205,196,0.15)' ?>;color:<?= $b['payment_plan'] === 'full' ? '#2ecc71' : 'var(--accent-teal)' ?>;border:1px solid <?= $b['payment_plan'] === 'full' ? 'rgba(46,204,113,0.35)' : 'rgba(78,205,196,0.35)' ?>;font-weight:600;">
                                     <?= $b['payment_plan'] === 'full' ? 'Full Payment' : 'Downpayment' ?>
                                 </span>
+                            </div>
+                        <?php endif; ?>
+                        <?php if ((float)($b['excess_guest_fee'] ?? 0) > 0): ?>
+                            <div style="font-size:0.68rem;color:#f39c12;margin-top:2px;">
+                                <i class="fa-solid fa-user-plus"></i> incl. ₱<?= number_format((float)$b['excess_guest_fee'], 0) ?> excess
                             </div>
                         <?php endif; ?>
                         <?php if ((float)($b['discount_amount'] ?? 0) > 0): ?>
@@ -419,12 +450,24 @@ $bookings = $stmt->fetchAll();
                     <td>
                         <div style="display:flex;gap:6px;align-items:center;flex-wrap:nowrap;">
                             <?php if ($isPending): ?>
-                                <!-- Approve Button -->
-                                <button type="button" class="btn-approve-bk"
-                                        onclick="openApproveModal(<?= $b['id'] ?>, '<?= htmlspecialchars(addslashes($ref)) ?>', '<?= htmlspecialchars(addslashes($b['customer_name'])) ?>', '<?= htmlspecialchars(addslashes($b['package_name'])) ?>', '<?= formatCurrency($realTotal) ?>', '<?= formatDate($b['event_date']) ?>')"
-                                        title="Approve and confirm this booking">
-                                    <i class="fa-solid fa-check"></i> Approve
-                                </button>
+                                <?php if ($realPaid > 0): ?>
+                                    <!-- Approve Button (Payment received) -->
+                                    <button type="button" class="btn-approve-bk"
+                                            onclick="openApproveModal(<?= $b['id'] ?>, '<?= htmlspecialchars(addslashes($ref)) ?>', '<?= htmlspecialchars(addslashes($b['customer_name'])) ?>', '<?= htmlspecialchars(addslashes($b['package_name'])) ?>', '<?= formatCurrency($realTotal) ?>', '<?= formatDate($b['event_date']) ?>')"
+                                            title="Payment received. Click to approve and confirm this booking">
+                                        <i class="fa-solid fa-check"></i> Approve
+                                    </button>
+                                <?php elseif (!empty($b['pending_submissions'])): ?>
+                                    <!-- Review Proof (uploaded receipt waiting) -->
+                                    <a href="<?= APP_URL ?>/staff/payment_submissions.php" class="btn btn-warning btn-sm" style="font-weight:700;white-space:nowrap;" title="Customer uploaded payment receipt. Verify in Payment Submissions to approve">
+                                        <i class="fa-solid fa-receipt"></i> Review Proof
+                                    </a>
+                                <?php else: ?>
+                                    <!-- Collect Payment first -->
+                                    <a href="<?= APP_URL ?>/staff/bills.php?pay_booking_id=<?= $b['id'] ?>" class="btn btn-success btn-sm" style="font-weight:700;white-space:nowrap;background:linear-gradient(135deg, #27ae60 0%, #219653 100%);border-color:#27ae60;" title="Collect customer payment to approve booking">
+                                        <i class="fa-solid fa-cash-register"></i> Collect &amp; Approve
+                                    </a>
+                                <?php endif; ?>
                                 <!-- Cancel/Decline Button -->
                                 <button type="button" class="btn btn-secondary btn-sm"
                                         onclick="openCancelModal(<?= $b['id'] ?>, '<?= htmlspecialchars(addslashes($ref)) ?>', '<?= htmlspecialchars(addslashes($b['customer_name'])) ?>')"
@@ -479,7 +522,7 @@ $bookings = $stmt->fetchAll();
             <input type="hidden" name="id" id="approveBookingId">
             <div class="modal-body">
                 <p style="margin-bottom:16px;color:var(--text-secondary);font-size:0.9rem;">
-                    As Cashier, you are confirming this customer booking. Once approved, the booking status becomes <strong>Confirmed</strong> and payment can be received.
+                    As Cashier, you are confirming this customer booking. Payment has been verified. Once approved, the booking status becomes <strong>Confirmed</strong>.
                 </p>
 
                 <div style="background:rgba(39,174,96,0.08);border:1px solid rgba(39,174,96,0.25);border-radius:12px;padding:16px;margin-bottom:18px;">

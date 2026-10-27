@@ -6,6 +6,7 @@ requireApproved();
 
 $db         = getDB();
 syncPastBookingsAndSlots($db);
+ensureSecurityDepositColumns($db);
 $user       = getCurrentUser();
 $userId     = $user['user_id'] ?? $user['id'];
 $ongoingBookings     = getCustomerOngoingBookings($userId);
@@ -19,6 +20,7 @@ $preDate    = preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['date'] ?? '') ? $_GET['
 
 
 // Load packages and venues for form
+ensureExcessGuestColumns($db);
 $packages = getActivePackages();
 $venues   = $db->query("SELECT venue_id AS id, venue_id, venue_name AS name, venue_name, capacity, location, availability_status FROM venues WHERE availability_status = 'available' ORDER BY venue_name")->fetchAll();
 
@@ -26,9 +28,14 @@ $venues   = $db->query("SELECT venue_id AS id, venue_id, venue_name AS name, ven
 $pkgPriceMap      = [];
 $pkgDiscountMap   = [];
 $pkgInclusionsMap = [];
+$pkgGuestMap      = [];
 
 foreach ($packages as $p) {
     $pkgPriceMap[$p['id']]    = $p['price'];
+    $pkgGuestMap[$p['id']]    = [
+        'max_guests'        => (int)($p['max_guests'] ?? 75),
+        'extra_guest_price' => (float)($p['extra_guest_price'] ?? 75.00),
+    ];
     $pkgDiscountMap[$p['id']] = [
         'full_payment_discount_percent' => (float)($p['full_payment_discount_percent'] ?? 10),
         'downpayment_discount_percent'  => (float)($p['downpayment_discount_percent']  ?? 5),
@@ -109,24 +116,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $paymentPlan = in_array($_POST['payment_plan'] ?? '', ['full','downpayment']) ? $_POST['payment_plan'] : 'full';
 
     if (empty($errors)) {
+        ensureExcessGuestColumns($db);
         $pkgStmt = $db->prepare("SELECT base_price, event_type,
             COALESCE(full_payment_discount_percent,10) AS full_payment_discount_percent,
             COALESCE(downpayment_discount_percent,5)  AS downpayment_discount_percent,
-            COALESCE(downpayment_percent,50)          AS downpayment_percent
+            COALESCE(downpayment_percent,50)          AS downpayment_percent,
+            COALESCE(security_deposit, 2000.00)       AS security_deposit,
+            COALESCE(max_guests, 75)                  AS max_guests,
+            COALESCE(extra_guest_price, 75.00)        AS extra_guest_price
             FROM packages WHERE package_id = ?");
         $pkgStmt->execute([$pkgId]);
         $pkg = $pkgStmt->fetch();
+
+        $pkgMaxGuests    = (int)($pkg['max_guests'] ?? 75);
+        $extraPrice      = (float)($pkg['extra_guest_price'] ?? 75.00);
+        $excessGuests    = max(0, $numGuests - $pkgMaxGuests);
+        $excessGuestFee  = round($excessGuests * $extraPrice, 2);
 
         $pricing   = calculatePackagePricing(
             (float)$pkg['base_price'],
             (float)$pkg['full_payment_discount_percent'],
             (float)$pkg['downpayment_discount_percent'],
             (float)$pkg['downpayment_percent'],
-            $paymentPlan
+            $paymentPlan,
+            $excessGuestFee
         );
         $total      = $pricing['discounted_total'];
         $downAmt    = $pricing['downpayment_due'];
         $eventType  = $pkg['event_type'] ?? 'Wedding';
+        $secDeposit = (float)($pkg['security_deposit'] ?? 2000.00);
 
         $ref    = generateBookingRef();
         $userId = $user['user_id'] ?? $user['id'];
@@ -134,20 +152,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $dueDate = date('Y-m-d', max(strtotime('+1 day'), strtotime('-7 days', strtotime($eventDate))));
 
         try {
-            // Ensure bookings table has discount/payment_plan columns
-            try { $db->exec("ALTER TABLE bookings ADD COLUMN payment_plan VARCHAR(20) NOT NULL DEFAULT 'full'"); } catch(PDOException $e) {}
-            try { $db->exec("ALTER TABLE bookings ADD COLUMN discount_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00"); } catch(PDOException $e) {}
-            try { $db->exec("ALTER TABLE bookings ADD COLUMN downpayment_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00"); } catch(PDOException $e) {}
+            // Ensure bookings table has discount/payment_plan/deposit/excess columns
+            ensureSecurityDepositColumns($db);
+            ensureExcessGuestColumns($db);
             $ins = $db->prepare("
                 INSERT INTO bookings
-                    (booking_reference, customer_id, package_id, venue_id, event_date, payment_due_date, event_time, event_type, guest_count, total_amount, payment_plan, discount_amount, downpayment_amount, status, notes)
+                    (booking_reference, customer_id, package_id, venue_id, event_date, payment_due_date, event_time, event_type,
+                     guest_count, excess_guests, excess_guest_fee, package_guest_limit, per_guest_fee,
+                     total_amount, payment_plan, discount_amount, downpayment_amount, security_deposit, deposit_status, status, notes)
                 VALUES
-                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?)
+                    (?, ?, ?, ?, ?, ?, ?, ?,
+                     ?, ?, ?, ?, ?,
+                     ?, ?, ?, ?, ?, 'held', 'Pending', ?)
             ");
             $ins->execute([
                 $ref, $userId, $pkgId, $venueId,
-                $eventDate, $dueDate, $eventTime, $eventType, $numGuests,
+                $eventDate, $dueDate, $eventTime, $eventType,
+                $numGuests, $excessGuests, $excessGuestFee, $pkgMaxGuests, $extraPrice,
                 $total, $paymentPlan, $pricing['discount_amount'], $downAmt,
+                $secDeposit,
                 $notes
             ]);
         } catch (PDOException $e) {
@@ -160,9 +183,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if (empty($errors)) {
+            $newBookingId = (int)$db->lastInsertId();
             logAudit($userId, 'BOOKING', "Created booking #{$ref} for package #{$pkgId}", 'bookings');
-            setFlash('success', "Booking submitted successfully! Please wait for cashier approval.");
-            redirect(APP_URL . '/customer/bookings.php');
+            setFlash('success', "Booking <strong>{$ref}</strong> submitted! Please complete your payment below so the cashier can verify and approve your booking.");
+            redirect(APP_URL . '/customer/submit_payment.php?id=' . $newBookingId);
         }
     }
 }
@@ -172,6 +196,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 <script>
     window.packagePrices     = <?= json_encode($pkgPriceMap) ?>;
+    window.packageGuests     = <?= json_encode($pkgGuestMap) ?>;
     window.packageDiscounts  = <?= json_encode($pkgDiscountMap) ?>;
     window.packageInclusions = <?= json_encode($pkgInclusionsMap) ?>;
     window.venueBookedDates  = <?= json_encode($venueBookedDatesMap) ?>;
@@ -510,11 +535,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $pAvail      = (int)($p['available_slots'] ?? max(0, ($p['max_slots'] ?? 5)));
                         $pIsFull     = $pAvail <= 0;
                         $slotHint    = $pIsFull ? ' [FULLY BOOKED]' : " [{$pAvail} slot" . ($pAvail === 1 ? '' : 's') . " left]";
+                        $guestHint   = ' (Up to ' . (int)($p['max_guests'] ?? 75) . ' guests)';
                     ?>
                         <option value="<?= $p['id'] ?>"
                                 <?= ($selectedPackage && $selectedPackage['id'] == $p['id']) || ($_POST['package_id'] ?? '') == $p['id'] ? 'selected' : '' ?>
                                 <?= $pIsFull ? 'disabled' : '' ?>>
-                            <?= htmlspecialchars($p['name']) ?> — <?= formatCurrency($p['price']) ?><?= $discHint ?><?= $slotHint ?>
+                            <?= htmlspecialchars($p['name']) ?> — <?= formatCurrency($p['price']) ?><?= $guestHint ?><?= $discHint ?><?= $slotHint ?>
                         </option>
                     <?php endforeach; ?>
                 </select>
@@ -598,7 +624,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="form-group">
                     <label class="form-label" for="num_guests">Number of Guests <span style="color:var(--accent-red);">*</span></label>
                     <input type="number" id="num_guests" name="num_guests" class="form-control"
-                           min="1" max="200" value="<?= (int)($_POST['num_guests'] ?? 1) ?>" required>
+                           min="1" max="1000" value="<?= (int)($_POST['num_guests'] ?? 1) ?>" required oninput="updateBookingSummary()">
+                    <div id="guest-package-limit-hint" style="font-size:0.78rem;color:var(--text-muted);margin-top:4px;">
+                        <i class="fa-solid fa-users"></i> Package includes up to <strong id="hint-pkg-limit" style="color:var(--accent-teal);">75</strong> guests. Excess: <strong id="hint-extra-rate" style="color:var(--accent-gold);">₱ 75.00</strong>/guest add-on.
+                    </div>
+                    <div id="excess-guest-alert" style="display:none;margin-top:8px;padding:8px 12px;background:rgba(245,166,35,0.12);border:1px solid rgba(245,166,35,0.4);border-radius:8px;font-size:0.83rem;color:#f5a623;display:flex;align-items:center;gap:8px;">
+                        <i class="fa-solid fa-circle-exclamation" style="font-size:1.1rem;flex-shrink:0;"></i>
+                        <div>Guest count exceeds package limit by <strong id="alert-excess-count" style="color:#fff;">0</strong> guests. Excess add-on: <strong id="alert-excess-fee" style="color:#fff;">₱ 0.00</strong> included in total amount.</div>
+                    </div>
                 </div>
             </div>
 
@@ -645,8 +678,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <div style="padding:14px 16px 0;">
                 <!-- Original Price row -->
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:0.88rem;color:var(--text-secondary);">
-                    <span>Original Price</span>
+                    <span>Base Package Price</span>
                     <span id="sum_original">₱ 0.00</span>
+                </div>
+                <!-- Excess Guests Add-on row -->
+                <div id="sum_excess_row" style="display:none;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:0.88rem;color:var(--accent-gold);">
+                    <span><i class="fa-solid fa-user-plus" style="margin-right:4px;"></i>Excess Guests (<span id="sum_excess_calc">0 extra</span>)</span>
+                    <span style="font-weight:700;color:var(--accent-gold);">+₱ <span id="sum_excess_amt">0.00</span></span>
                 </div>
                 <!-- Discount row -->
                 <div id="sum_discount_row" style="display:none;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:0.88rem;color:#4ecdc4;">
@@ -669,6 +707,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <span id="sum_due_today" style="font-size:1rem;font-weight:800;color:var(--accent-gold);">₱ 0.00</span>
                 </div>
                 <div style="font-size:0.72rem;color:var(--text-muted);margin-top:4px;">Remaining balance due on or before the event.</div>
+            </div>
+
+            <!-- Refundable Security Deposit Card -->
+            <div style="margin:8px 16px;padding:12px 14px;background:rgba(167,139,250,0.08);border-radius:10px;border:1px solid rgba(167,139,250,0.25);">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <span style="font-size:0.82rem;color:#a78bfa;font-weight:700;"><i class="fa-solid fa-shield-halved"></i> Security Deposit</span>
+                    <span style="font-size:0.95rem;font-weight:800;color:#a78bfa;">₱ 2,000.00</span>
+                </div>
+                <div style="font-size:0.72rem;color:var(--text-muted);margin-top:4px;line-height:1.4;">
+                    100% refundable back to you after the event if no damage occurs to equipment or venue.
+                </div>
             </div>
 
             <!-- Inclusions Box -->
@@ -882,6 +931,38 @@ function updateBookingSummary() {
     var dpPct        = parseFloat(discounts.downpayment_discount_percent  || 5);
     var dpReqPct     = parseFloat(discounts.downpayment_percent           || 50);
 
+    // Guest limits & excess calculation
+    var numGuestsEl   = document.getElementById('num_guests');
+    var numGuests     = numGuestsEl ? parseInt(numGuestsEl.value || 1, 10) : 1;
+    if (isNaN(numGuests) || numGuests < 1) numGuests = 1;
+
+    var pkgGuestsInfo = (window.packageGuests && window.packageGuests[pkgId]) ? window.packageGuests[pkgId] : {max_guests:75, extra_guest_price:75};
+    var maxGuests     = parseInt(pkgGuestsInfo.max_guests || 75, 10);
+    var extraPrice    = parseFloat(pkgGuestsInfo.extra_guest_price || 75);
+
+    // Update guest hint labels
+    var hintPkgLimit  = document.getElementById('hint-pkg-limit');
+    var hintExtraRate = document.getElementById('hint-extra-rate');
+    var excessAlert   = document.getElementById('excess-guest-alert');
+    var alertCount    = document.getElementById('alert-excess-count');
+    var alertFee      = document.getElementById('alert-excess-fee');
+
+    if (hintPkgLimit)  hintPkgLimit.textContent = maxGuests;
+    if (hintExtraRate) hintExtraRate.textContent = fmt(extraPrice);
+
+    var excessGuests = Math.max(0, numGuests - maxGuests);
+    var excessFee    = excessGuests * extraPrice;
+
+    if (excessAlert && alertCount && alertFee) {
+        if (pkgId && excessGuests > 0) {
+            alertCount.textContent = excessGuests;
+            alertFee.textContent   = fmt(excessFee);
+            excessAlert.style.display = 'flex';
+        } else {
+            excessAlert.style.display = 'none';
+        }
+    }
+
     // Update plan badge labels
     var fpctEl = document.getElementById('full-pct');
     var dpctEl = document.getElementById('dp-pct');
@@ -903,20 +984,33 @@ function updateBookingSummary() {
 
     var discPct      = (plan === 'full') ? fullPct : dpPct;
     var discAmt      = basePrice * discPct / 100;
-    var discTotal    = basePrice - discAmt;
+    var discTotal    = (basePrice - discAmt) + excessFee;
     var dueToday     = (plan === 'downpayment') ? (discTotal * dpReqPct / 100) : discTotal;
 
     // Update DOM
-    var sumOrigEl  = document.getElementById('sum_original');
-    var sumDrRow   = document.getElementById('sum_discount_row');
-    var sumDrPct   = document.getElementById('sum_discount_pct');
-    var sumDrAmt   = document.getElementById('sum_discount_amt');
-    var totalDisp  = document.getElementById('total_display');
-    var totalHid   = document.getElementById('total_amount');
-    var dueTodayBl = document.getElementById('sum_due_today_block');
-    var dueTodayEl = document.getElementById('sum_due_today');
+    var sumOrigEl    = document.getElementById('sum_original');
+    var sumExcessRow = document.getElementById('sum_excess_row');
+    var sumExcessClc = document.getElementById('sum_excess_calc');
+    var sumExcessAmt = document.getElementById('sum_excess_amt');
+    var sumDrRow     = document.getElementById('sum_discount_row');
+    var sumDrPct     = document.getElementById('sum_discount_pct');
+    var sumDrAmt     = document.getElementById('sum_discount_amt');
+    var totalDisp    = document.getElementById('total_display');
+    var totalHid     = document.getElementById('total_amount');
+    var dueTodayBl   = document.getElementById('sum_due_today_block');
+    var dueTodayEl   = document.getElementById('sum_due_today');
 
     if (sumOrigEl) sumOrigEl.textContent = basePrice > 0 ? fmt(basePrice) : '₱ 0.00';
+
+    if (sumExcessRow && sumExcessClc && sumExcessAmt) {
+        if (pkgId && excessGuests > 0) {
+            sumExcessClc.textContent = excessGuests + ' extra @ ' + fmt(extraPrice) + '/head';
+            sumExcessAmt.textContent = fmtNum(excessFee);
+            sumExcessRow.style.display = 'flex';
+        } else {
+            sumExcessRow.style.display = 'none';
+        }
+    }
 
     if (basePrice > 0 && discPct > 0) {
         if (sumDrRow) { sumDrRow.style.display = 'flex'; }

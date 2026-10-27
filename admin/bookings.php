@@ -4,8 +4,8 @@ require_once __DIR__ . '/../includes/header.php';
 requireRole(['admin']);
 $db = getDB();
 
-// Auto-sync: mark past bookings as Completed/Cancelled in real-time
 syncPastBookingsAndSlots($db);
+ensureExcessGuestColumns($db);
 
 // Handle status updates
 // Handle status updates and management
@@ -343,7 +343,16 @@ $bookings = $stmt->fetchAll();
                         <div style="font-weight:600;"><?= htmlspecialchars($b['customer_name']) ?></div>
                         <div style="font-size:0.78rem;color:var(--text-secondary);"><?= htmlspecialchars($b['customer_email']) ?></div>
                     </td>
-                    <td><?= htmlspecialchars($b['package_name']) ?></td>
+                    <td>
+                        <div style="font-weight:600;"><?= htmlspecialchars($b['package_name']) ?></div>
+                        <div style="font-size:0.75rem;color:var(--text-muted);"><i class="fa-solid fa-users"></i> <?= (int)($b['guest_count'] ?? 1) ?> guests</div>
+                        <?php if ((float)($b['excess_guest_fee'] ?? 0) > 0): ?>
+                            <div style="font-size:0.71rem;color:#f39c12;margin-top:2px;display:flex;align-items:center;gap:3px;" title="<?= (int)($b['excess_guests'] ?? 0) ?> excess guest(s) @ ₱<?= number_format((float)($b['per_guest_fee'] ?? 75), 2) ?>">
+                                <i class="fa-solid fa-user-plus" style="font-size:0.65rem;"></i>
+                                <span>+<?= (int)($b['excess_guests'] ?? 0) ?> excess (+₱<?= number_format((float)$b['excess_guest_fee'], 0) ?>)</span>
+                            </div>
+                        <?php endif; ?>
+                    </td>
                     <td><?= htmlspecialchars($b['venue_name'] ?? '—') ?></td>
                     <td style="white-space:nowrap;">
                         <?= formatDate($b['event_date']) ?>
@@ -360,6 +369,11 @@ $bookings = $stmt->fetchAll();
                                 <span class="badge" style="font-size:0.68rem;padding:2px 6px;background:<?= $b['payment_plan'] === 'full' ? 'rgba(46,204,113,0.15)' : 'rgba(78,205,196,0.15)' ?>;color:<?= $b['payment_plan'] === 'full' ? '#2ecc71' : 'var(--accent-teal)' ?>;border:1px solid <?= $b['payment_plan'] === 'full' ? 'rgba(46,204,113,0.35)' : 'rgba(78,205,196,0.35)' ?>;font-weight:600;">
                                     <?= $b['payment_plan'] === 'full' ? 'Full Payment' : 'Downpayment' ?>
                                 </span>
+                            </div>
+                        <?php endif; ?>
+                        <?php if ((float)($b['excess_guest_fee'] ?? 0) > 0): ?>
+                            <div style="font-size:0.68rem;color:#f39c12;margin-top:2px;">
+                                <i class="fa-solid fa-user-plus"></i> incl. ₱<?= number_format((float)$b['excess_guest_fee'], 0) ?> excess
                             </div>
                         <?php endif; ?>
                         <?php if ((float)($b['discount_amount'] ?? 0) > 0): ?>

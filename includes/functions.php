@@ -271,6 +271,8 @@ function getPackageLiveSlots(int $packageId, ?PDO $db = null): array {
 function getActivePackages(): array {
     $db   = getDB();
     ensureDiscountColumns($db);
+    ensureSecurityDepositColumns($db);
+    ensureExcessGuestColumns($db);
     syncPastBookingsAndSlots($db);
 
     $stmt = $db->query("SELECT package_id AS id, package_id, package_name AS name, package_name,
@@ -279,6 +281,8 @@ function getActivePackages(): array {
         COALESCE(downpayment_discount_percent,5)  AS downpayment_discount_percent,
         COALESCE(downpayment_percent,50)          AS downpayment_percent,
         COALESCE(max_slots, 5)                    AS max_slots,
+        COALESCE(p.max_guests, 75)                AS max_guests,
+        COALESCE(p.extra_guest_price, 75.00)      AS extra_guest_price,
         (SELECT COUNT(*) FROM bookings WHERE package_id = p.package_id AND status NOT IN ('Cancelled')) AS booked_count,
         (SELECT COUNT(*) FROM bookings WHERE package_id = p.package_id AND status = 'Completed') AS completed_count,
         (SELECT COUNT(*) FROM bookings WHERE package_id = p.package_id AND status IN ('Pending','Confirmed','Paid') AND event_date >= CURDATE()) AS active_booking_count,
@@ -292,6 +296,8 @@ function getActivePackages(): array {
 // -----------------------------------------------
 function getBookingById(int $id): ?array {
     $db   = getDB();
+    ensureSecurityDepositColumns($db);
+    ensureExcessGuestColumns($db);
     $stmt = $db->prepare("
         SELECT b.*, b.booking_id AS id, u.name AS customer_name, u.email AS customer_email, u.contact_no AS customer_phone,
                p.package_name AS package_name, p.base_price AS package_price,
@@ -381,19 +387,116 @@ function ensureDiscountColumns(?PDO $db = null): void {
 }
 
 // -----------------------------------------------
-//  Calculate Package Pricing with Discounts
+//  Ensure Security Deposit Columns on Bookings & Packages
 // -----------------------------------------------
-function calculatePackagePricing(float $basePrice, float $fullDiscountPct = 10.0, float $downDiscountPct = 5.0, float $downRequiredPct = 50.0, string $plan = 'full'): array {
+function ensureSecurityDepositColumns(?PDO $db = null): void {
+    static $ensured = false;
+    if ($ensured) return;
+    $db = $db ?? getDB();
+
+    try {
+        $bCols = [
+            'security_deposit'    => "DECIMAL(10,2) NOT NULL DEFAULT 2000.00 AFTER total_amount",
+            'deposit_status'      => "ENUM('held','returned','forfeited') NOT NULL DEFAULT 'held' AFTER security_deposit",
+            'deposit_returned_at' => "TIMESTAMP NULL DEFAULT NULL AFTER deposit_status",
+            'deposit_note'        => "TEXT NULL DEFAULT NULL AFTER deposit_returned_at",
+        ];
+        foreach ($bCols as $col => $def) {
+            $chk = $db->query("SHOW COLUMNS FROM bookings LIKE '{$col}'")->fetch();
+            if (!$chk) {
+                $db->exec("ALTER TABLE bookings ADD COLUMN {$col} {$def}");
+            }
+        }
+        // Set default 2000.00 security deposit for existing active bookings with 0.00 so deposit feature works out of the box
+        $db->exec("UPDATE bookings SET security_deposit = 2000.00 WHERE (security_deposit IS NULL OR security_deposit = 0) AND total_amount > 0 AND status != 'Cancelled'");
+    } catch (Exception $e) {}
+
+    try {
+        $chkPkg = $db->query("SHOW COLUMNS FROM packages LIKE 'security_deposit'")->fetch();
+        if (!$chkPkg) {
+            $db->exec("ALTER TABLE packages ADD COLUMN security_deposit DECIMAL(10,2) NOT NULL DEFAULT 2000.00 AFTER base_price");
+        }
+    } catch (Exception $e) {}
+
+    $ensured = true;
+}
+
+// -----------------------------------------------
+//  Ensure Excess Guest Add-On Columns on Bookings & Packages
+// -----------------------------------------------
+function ensureExcessGuestColumns(?PDO $db = null): void {
+    $db = $db ?? getDB();
+
+    try {
+        $pCols = [
+            'max_guests'        => "SMALLINT UNSIGNED NOT NULL DEFAULT 75 AFTER base_price",
+            'extra_guest_price' => "DECIMAL(10,2) NOT NULL DEFAULT 75.00 AFTER max_guests",
+        ];
+        foreach ($pCols as $col => $def) {
+            $chk = $db->query("SHOW COLUMNS FROM packages LIKE '{$col}'")->fetch();
+            if (!$chk) {
+                $db->exec("ALTER TABLE packages ADD COLUMN {$col} {$def}");
+            }
+        }
+        // Set DISTINCT guest limits and ₱50–100/head pricing per event type.
+        // Also auto-corrects packages that still carry old high-value defaults (₱400–500).
+        $db->exec("UPDATE packages SET max_guests = 100, extra_guest_price = 100.00
+                   WHERE event_type = 'Wedding'
+                   AND (max_guests IS NULL OR max_guests = 0 OR extra_guest_price >= 400.00)");
+        $db->exec("UPDATE packages SET max_guests = 80,  extra_guest_price = 80.00
+                   WHERE event_type = 'Debut'
+                   AND (max_guests IS NULL OR max_guests = 0 OR extra_guest_price >= 400.00)");
+        $db->exec("UPDATE packages SET max_guests = 60,  extra_guest_price = 75.00
+                   WHERE event_type = 'Birthday'
+                   AND (max_guests IS NULL OR max_guests = 0 OR extra_guest_price >= 400.00)");
+        $db->exec("UPDATE packages SET max_guests = 40,  extra_guest_price = 50.00
+                   WHERE event_type = 'Christening'
+                   AND (max_guests IS NULL OR max_guests = 0 OR extra_guest_price >= 400.00)");
+        // Any other event type still carrying old defaults
+        $db->exec("UPDATE packages SET max_guests = 75,  extra_guest_price = 75.00
+                   WHERE (max_guests IS NULL OR max_guests = 0 OR extra_guest_price >= 400.00)
+                   AND event_type NOT IN ('Wedding','Debut','Birthday','Christening')");
+    } catch (Exception $e) {}
+
+    try {
+        $bCols = [
+            'excess_guests'       => "SMALLINT UNSIGNED NOT NULL DEFAULT 0 AFTER guest_count",
+            'excess_guest_fee'    => "DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER excess_guests",
+            'package_guest_limit' => "SMALLINT UNSIGNED NOT NULL DEFAULT 75 AFTER excess_guest_fee",
+            'per_guest_fee'       => "DECIMAL(10,2) NOT NULL DEFAULT 75.00 AFTER package_guest_limit",
+        ];
+        foreach ($bCols as $col => $def) {
+            $chk = $db->query("SHOW COLUMNS FROM bookings LIKE '{$col}'")->fetch();
+            if (!$chk) {
+                $db->exec("ALTER TABLE bookings ADD COLUMN {$col} {$def}");
+            }
+        }
+    } catch (Exception $e) {}
+}
+
+
+// -----------------------------------------------
+//  Calculate Package Pricing with Discounts & Excess Guest Add-On
+// -----------------------------------------------
+function calculatePackagePricing(
+    float $basePrice,
+    float $fullDiscountPct = 10.0,
+    float $downDiscountPct = 5.0,
+    float $downRequiredPct = 50.0,
+    string $plan = 'full',
+    float $excessGuestFee = 0.0
+): array {
     $basePrice       = round(max(0.0, $basePrice), 2);
     $fullDiscountPct = round(max(0.0, min(100.0, $fullDiscountPct)), 2);
     $downDiscountPct = round(max(0.0, min(100.0, $downDiscountPct)), 2);
     $downRequiredPct = round(max(1.0, min(100.0, $downRequiredPct ?: 50.0)), 2);
+    $excessGuestFee  = round(max(0.0, $excessGuestFee), 2);
 
     $fullDiscountAmt = round($basePrice * ($fullDiscountPct / 100.0), 2);
-    $fullPayPrice    = round(max(0.0, $basePrice - $fullDiscountAmt), 2);
+    $fullPayPrice    = round(max(0.0, ($basePrice - $fullDiscountAmt) + $excessGuestFee), 2);
 
     $downDiscountAmt = round($basePrice * ($downDiscountPct / 100.0), 2);
-    $downTotalPrice  = round(max(0.0, $basePrice - $downDiscountAmt), 2);
+    $downTotalPrice  = round(max(0.0, ($basePrice - $downDiscountAmt) + $excessGuestFee), 2);
     $reqDownpayment  = round($downTotalPrice * ($downRequiredPct / 100.0), 2);
     $downBalance     = round(max(0.0, $downTotalPrice - $reqDownpayment), 2);
 

@@ -19,6 +19,8 @@ $totalOngoingBalance = array_sum(array_column($ongoingBookings, 'calculated_bala
 
 // Ensure discount columns exist
 ensureDiscountColumns($db);
+ensureSecurityDepositColumns($db);
+ensureExcessGuestColumns($db);
 
 // Fetch active packages with live available slot counts (only future bookings occupy slots)
 $packages = $db->query("
@@ -264,6 +266,10 @@ $catIcons = [
             </div>
 
             <div class="package-card-body">
+                <div style="display:flex;align-items:center;gap:6px;font-size:0.8rem;color:var(--accent-teal);margin-bottom:12px;background:rgba(78,205,196,0.08);padding:6px 12px;border-radius:10px;border:1px solid rgba(78,205,196,0.2);">
+                    <i class="fa-solid fa-users"></i>
+                    <span>Includes up to <strong><?= (int)($pkg['max_guests'] ?? 75) ?> guests</strong> <span style="color:var(--accent-gold);margin-left:4px;">(+<?= formatCurrency($pkg['extra_guest_price'] ?? 75) ?>/extra)</span></span>
+                </div>
                 <p class="package-description">
                     <?= htmlspecialchars($pkg['description'] ?: 'A wonderful craft experience awaits you!') ?>
                 </p>

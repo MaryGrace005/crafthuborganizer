@@ -38,6 +38,12 @@ if (empty($dateFrom) || empty($dateTo)) {
             $dateFrom = date('Y-m-d');
             $dateTo   = date('Y-m-d');
             break;
+        case 'monthly_picker':
+            $month    = max(1, min(12, (int)($_GET['month'] ?? date('n'))));
+            $year     = max(2000, min(2100, (int)($_GET['year']  ?? date('Y'))));
+            $dateFrom = sprintf('%04d-%02d-01', $year, $month);
+            $dateTo   = date('Y-m-t', strtotime($dateFrom));
+            break;
         case 'monthly':
         default:
             $dateFrom = date('Y-m-01');
@@ -99,13 +105,24 @@ $end     = strtotime($dateTo);
 while ($current <= $end) {
     $key = date('Y-m-d', $current);
     if ($period === 'yearly') {
-        $label = date('M', $current);
-        $current = strtotime('+1 month', $current);
+        $label   = date('M', $current);
+        $nextTs  = strtotime('+1 month', $current);
+        // Sum ALL days in this month from $revMap (not just the 1st)
+        $dayTs   = $current;
+        $daySum  = 0.0;
+        while ($dayTs < $nextTs && $dayTs <= $end) {
+            $dayKey  = date('Y-m-d', $dayTs);
+            $daySum += ($revMap[$dayKey] ?? 0);
+            $dayTs   = strtotime('+1 day', $dayTs);
+        }
+        $current = $nextTs;
     } elseif ($period === 'weekly') {
-        $label = date('D', $current);
+        $label   = date('D', $current);
+        $daySum  = ($revMap[$key] ?? 0);
         $current = strtotime('+1 day', $current);
     } else {
-        $label = date('d M', $current);
+        $label   = date('d M', $current);
+        $daySum  = ($revMap[$key] ?? 0);
         $current = strtotime('+1 day', $current);
     }
     if (!in_array($label, $revenueLabels)) {
@@ -113,7 +130,7 @@ while ($current <= $end) {
         $revenueData[]   = 0;
     }
     $idx = array_search($label, $revenueLabels);
-    $revenueData[$idx] += ($revMap[$key] ?? 0);
+    $revenueData[$idx] += $daySum;
 }
 
 // ── Bookings by Period ──────────────────────────────────────
@@ -134,14 +151,29 @@ $bookingData   = [];
 $current = strtotime($dateFrom);
 while ($current <= $end) {
     $key = date('Y-m-d', $current);
-    $label = ($period === 'yearly') ? date('M', $current) : (($period === 'weekly') ? date('D', $current) : date('d M', $current));
-    $current = ($period === 'yearly') ? strtotime('+1 month', $current) : strtotime('+1 day', $current);
+    if ($period === 'yearly') {
+        $label   = date('M', $current);
+        $nextTs  = strtotime('+1 month', $current);
+        // Sum ALL days in this month from $bkMap (not just the 1st)
+        $dayTs   = $current;
+        $daySum  = 0;
+        while ($dayTs < $nextTs && $dayTs <= $end) {
+            $dayKey  = date('Y-m-d', $dayTs);
+            $daySum += ($bkMap[$dayKey] ?? 0);
+            $dayTs   = strtotime('+1 day', $dayTs);
+        }
+        $current = $nextTs;
+    } else {
+        $label  = ($period === 'weekly') ? date('D', $current) : date('d M', $current);
+        $daySum = ($bkMap[$key] ?? 0);
+        $current = strtotime('+1 day', $current);
+    }
     if (!in_array($label, $bookingLabels)) {
         $bookingLabels[] = $label;
         $bookingData[]   = 0;
     }
     $idx = array_search($label, $bookingLabels);
-    $bookingData[$idx] += ($bkMap[$key] ?? 0);
+    $bookingData[$idx] += $daySum;
 }
 
 // ── Top Packages (Doughnut) ─────────────────────────────────

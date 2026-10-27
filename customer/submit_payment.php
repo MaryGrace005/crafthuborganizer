@@ -30,9 +30,9 @@ if (!$booking) {
     redirect(APP_URL . '/customer/bookings.php');
 }
 
-// Only Confirmed bookings can have payment submitted
-if (!in_array($booking['status'], ['Confirmed', 'Paid'])) {
-    setFlash('error', 'This booking is not yet approved for payment. Please wait for staff confirmation.');
+// Only active/pending/confirmed bookings can have payment submitted
+if (strtolower($booking['status']) === 'cancelled') {
+    setFlash('error', 'This booking has been cancelled and cannot accept payments.');
     redirect(APP_URL . '/customer/bookings.php');
 }
 
@@ -144,6 +144,18 @@ require_once __DIR__ . '/../includes/navbar.php';
         <i class="fa-solid fa-arrow-left"></i> Back to Bookings
     </a>
 </div>
+
+<?php if (strtolower($booking['status']) === 'pending'): ?>
+<div style="background:rgba(245,166,35,0.1);border:1px solid rgba(245,166,35,0.35);border-left:4px solid #f5a623;border-radius:12px;padding:16px 20px;margin-bottom:20px;display:flex;align-items:center;gap:14px;">
+    <i class="fa-solid fa-credit-card" style="font-size:1.6rem;color:#f5a623;"></i>
+    <div>
+        <strong style="color:#f5a623;font-size:1rem;">Step 2: Submit Payment to Confirm Booking</strong>
+        <p style="margin:3px 0 0;font-size:0.85rem;color:var(--text-secondary);line-height:1.4;">
+            Your booking is currently <strong>Pending Payment</strong>. Submit your payment proof below — once verified by our cashier, your booking will be officially approved!
+        </p>
+    </div>
+</div>
+<?php endif; ?>
 
 <?php if (!empty($errors)): ?>
 <div class="alert alert-error">

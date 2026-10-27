@@ -113,21 +113,17 @@ requireRole(['admin']);
         <!-- Month & Year Picker -->
         <form id="monthYearForm" onsubmit="applyMonthYear(event)" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <span style="font-size:0.85rem;color:var(--text-muted);font-weight:600;"><i class="fa-solid fa-calendar-day"></i> Specific Month:</span>
-            <select id="pickerMonth" class="form-control" style="width:auto;padding:6px 12px;font-size:0.85rem;">
-                <option value="1">January</option>
-                <option value="2">February</option>
-                <option value="3">March</option>
-                <option value="4">April</option>
-                <option value="5">May</option>
-                <option value="6">June</option>
-                <option value="7">July</option>
-                <option value="8">August</option>
-                <option value="9">September</option>
-                <option value="10">October</option>
-                <option value="11">November</option>
-                <option value="12">December</option>
+            <select id="pickerMonth" class="form-control" style="width:auto;padding:6px 12px;font-size:0.85rem;" onchange="applyMonthYear(event)">
+<?php
+$curMonth = (int)date('n');
+$monthNames = [1=>'January',2=>'February',3=>'March',4=>'April',5=>'May',6=>'June',7=>'July',8=>'August',9=>'September',10=>'October',11=>'November',12=>'December'];
+foreach ($monthNames as $mNum => $mName) {
+    $sel = ($mNum === $curMonth) ? ' selected' : '';
+    echo "                <option value=\"{$mNum}\"{$sel}>{$mName}</option>\n";
+}
+?>
             </select>
-            <select id="pickerYear" class="form-control" style="width:auto;padding:6px 12px;font-size:0.85rem;">
+            <select id="pickerYear" class="form-control" style="width:auto;padding:6px 12px;font-size:0.85rem;" onchange="applyMonthYear(event)">
 <?php
 $currentYear = (int)date('Y');
 for ($y = $currentYear; $y >= $currentYear - 5; $y--) {
@@ -378,7 +374,7 @@ function applyCustomDates(e) {
 }
 
 function applyMonthYear(e) {
-    e.preventDefault();
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
     pickerMonth = document.getElementById('pickerMonth').value;
     pickerYear  = document.getElementById('pickerYear').value;
     currentPeriod = 'monthly_picker';

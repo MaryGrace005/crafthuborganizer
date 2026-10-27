@@ -7,21 +7,62 @@ require_once __DIR__ . '/../includes/header.php';
 requireRole(['staff', 'cashier']);
 $db = getDB();
 ensureApprovalColumns($db);
+ensureSecurityDepositColumns($db);
+ensureExcessGuestColumns($db);
 
-// ── POST actions (Approve & Quick-pay) ──────────────────────
+// ── POST actions (Approve, Quick-pay, Deposit Update) ──────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
-    // Quick-approve pending booking directly from Bills (Approve only)
+    // ── Handle deposit return / forfeit ──────────────────────
+    if ($action === 'update_deposit') {
+        $bookingId     = (int)($_POST['booking_id'] ?? 0);
+        $depositAction = $_POST['deposit_action'] ?? ''; // 'returned' or 'forfeited'
+        $depositNote   = sanitize($_POST['deposit_note'] ?? '');
+        $cashierId     = $_SESSION['user_id'];
+
+        if ($bookingId > 0 && in_array($depositAction, ['returned', 'forfeited'])) {
+            $upd = $db->prepare("UPDATE bookings SET deposit_status = ?, deposit_returned_at = NOW(), deposit_note = ? WHERE booking_id = ?");
+            $upd->execute([$depositAction, $depositNote ?: null, $bookingId]);
+            $label = $depositAction === 'returned' ? 'returned to customer' : 'forfeited (damage)';
+            logAudit($cashierId, 'DEPOSIT_' . strtoupper($depositAction), "Security deposit {$label} for booking #{$bookingId}. Note: {$depositNote}", 'bookings');
+            setFlash('success', 'Security deposit has been marked as <strong>' . ucfirst($depositAction) . '</strong> successfully.');
+        } else {
+            setFlash('error', 'Invalid deposit action.');
+        }
+        redirect(APP_URL . '/staff/bills.php');
+    }
+
+    // Approve pending booking directly from Bills (Only allowed if payment has been made / verified)
     if ($action === 'approve_booking') {
         $bookingId = (int)($_POST['booking_id'] ?? 0);
         $cashierId = $_SESSION['user_id'] ?? 0;
-        $chk = $db->prepare("SELECT b.*, u.name AS customer_name FROM bookings b JOIN users u ON b.customer_id = u.user_id WHERE b.booking_id = ?");
+        $chk = $db->prepare("
+            SELECT b.*, u.name AS customer_name,
+                   (SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE booking_id = b.booking_id) AS total_paid,
+                   (SELECT COUNT(*) FROM payment_submissions WHERE booking_id = b.booking_id AND status = 'pending') AS pending_submissions
+            FROM bookings b 
+            JOIN users u ON b.customer_id = u.user_id 
+            WHERE b.booking_id = ?
+        ");
         $chk->execute([$bookingId]);
         $bk = $chk->fetch();
 
         if ($bk) {
             $ref = getBookingRef($bk);
+            $paidSoFar = (float)$bk['total_paid'];
+            $hasPendingProof = (int)$bk['pending_submissions'] > 0;
+
+            if ($paidSoFar <= 0.005) {
+                if ($hasPendingProof) {
+                    setFlash('warning', "Payment proof is awaiting verification! Please review and verify the online payment in <a href='" . APP_URL . "/staff/payment_submissions.php' style='color:#fff;text-decoration:underline;font-weight:700;'>Payment Submissions</a> to approve this booking.");
+                } else {
+                    setFlash('error', "Cannot approve booking <strong>{$ref}</strong>: Client must make a payment first before this booking can be approved. Please collect payment using <strong>Collect Payment</strong>.");
+                }
+                $qs = !empty($_GET['search']) ? '?search=' . urlencode($_GET['search']) : '';
+                redirect(APP_URL . '/staff/bills.php' . $qs);
+            }
+
             ensureApprovalColumns($db);
             $now = date('Y-m-d H:i:s');
 
@@ -31,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $timeFormatted = date('M d, Y g:i A', strtotime($now));
             logAudit($cashierId, 'APPROVE_BOOKING', "Cashier approved booking #{$bookingId} ({$ref}) on {$timeFormatted} from Bills", 'bookings');
-            setFlash('success', "✓ Booking <strong>{$ref}</strong> approved on <strong>{$timeFormatted}</strong>! Payment can now be collected.");
+            setFlash('success', "&#10003; Booking <strong>{$ref}</strong> verified &amp; approved on <strong>{$timeFormatted}</strong>!");
 
             $qs = !empty($_GET['search']) ? '?search=' . urlencode($_GET['search']) : '';
             redirect(APP_URL . '/staff/bills.php' . $qs);
@@ -49,7 +90,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $cashierId = $_SESSION['user_id'];
 
         if ($bookingId > 0 && $amount > 0) {
-            // Real-time check: Cashier cannot collect payment if booking is Pending or Cancelled
             $chkStmt = $db->prepare("SELECT status, total_amount, (SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE booking_id = bookings.booking_id) AS paid_so_far FROM bookings WHERE booking_id = ?");
             $chkStmt->execute([$bookingId]);
             $currBooking = $chkStmt->fetch();
@@ -59,15 +99,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 redirect(APP_URL . '/staff/bills.php');
             }
 
-            if (strtolower($currBooking['status']) === 'pending') {
-                setFlash('error', 'Cannot collect payment: Booking is still Pending. Please click Approve first to confirm the booking.');
-                redirect(APP_URL . '/staff/bills.php');
-            }
-
             if (strtolower($currBooking['status']) === 'cancelled') {
                 setFlash('error', 'Cannot collect payment: This booking has been cancelled.');
                 redirect(APP_URL . '/staff/bills.php');
             }
+
+            $wasPending = strtolower($currBooking['status']) === 'pending';
 
             $remainingBalance = round(max(0.0, (float)$currBooking['total_amount'] - (float)$currBooking['paid_so_far']), 2);
             if ($remainingBalance <= 0.005) {
@@ -88,14 +125,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $upd = $db->prepare("UPDATE bookings SET amount_paid = COALESCE(amount_paid, 0) + ? WHERE booking_id = ?");
                 $upd->execute([$amount, $bookingId]);
             } catch (PDOException $e) {}
+
+            // Auto-approve booking now that payment has been collected
+            if ($wasPending) {
+                ensureApprovalColumns($db);
+                $db->prepare("UPDATE bookings SET status = 'Confirmed', approved_at = NOW(), approved_by = ? WHERE booking_id = ?")
+                   ->execute([$cashierId, $bookingId]);
+            }
+
             updateBookingPaymentStatus($bookingId);
 
             logAudit($cashierId, 'PAYMENT', "Recorded payment of ₱{$amount} for booking #{$bookingId}", 'payments');
-            setFlash('success', 'Payment of ' . formatCurrency($amount) . ' recorded successfully! <a href="' . APP_URL . '/receipt.php?id=' . $newPayId . '" target="_blank" style="color:#fff;text-decoration:underline;margin-left:8px;font-weight:700;"><i class="fa-solid fa-receipt"></i> View Receipt (' . $orNumber . ')</a>');
+            $apprMsg = $wasPending ? ' Booking has been officially <strong>Approved &amp; Confirmed</strong>.' : '';
+            setFlash('success', 'Payment of ' . formatCurrency($amount) . ' recorded successfully!' . $apprMsg . ' <a href="' . APP_URL . '/receipt.php?id=' . $newPayId . '" target="_blank" style="color:#fff;text-decoration:underline;margin-left:8px;font-weight:700;"><i class="fa-solid fa-receipt"></i> View Receipt (' . $orNumber . ')</a>');
         } // end if bookingId > 0 && amount > 0
         redirect(APP_URL . '/staff/bills.php');
     } // end if action === 'mark_paid'
 }
+
 
 // ── Filters ────────────────────────────────────────────────
 $search     = sanitize($_GET['search'] ?? '');
@@ -107,6 +154,14 @@ $sql = "
         b.booking_id,
         b.booking_reference,
         b.total_amount,
+        COALESCE(b.guest_count, 1)          AS guest_count,
+        COALESCE(b.excess_guests, 0)         AS excess_guests,
+        COALESCE(b.excess_guest_fee, 0)      AS excess_guest_fee,
+        COALESCE(b.per_guest_fee, 75.00)     AS per_guest_fee,
+        COALESCE(b.security_deposit, 0) AS security_deposit,
+        COALESCE(b.deposit_status, 'held') AS deposit_status,
+        b.deposit_returned_at,
+        b.deposit_note,
         COALESCE(b.payment_plan, 'full') AS payment_plan,
         COALESCE(b.discount_amount, 0) AS discount_amount,
         COALESCE(b.downpayment_amount, 0) AS downpayment_amount,
@@ -120,7 +175,8 @@ $sql = "
         u.contact_no,
         p.package_name,
         COALESCE(SUM(pay.amount_paid), 0) AS total_paid,
-        MAX(pay.payment_id) AS latest_payment_id
+        MAX(pay.payment_id) AS latest_payment_id,
+        (SELECT COUNT(*) FROM payment_submissions WHERE booking_id = b.booking_id AND status = 'pending') AS pending_submissions_count
     FROM bookings b
     JOIN users    u ON b.customer_id = u.user_id
     JOIN packages p ON b.package_id  = p.package_id
@@ -221,6 +277,7 @@ foreach ($bills as $bill) {
                     <th>Event Date</th>
                     <th>Payment Due</th>
                     <th>Total Amount</th>
+                    <th>Sec. Deposit</th>
                     <th>Paid</th>
                     <th>Balance</th>
                     <th>Status</th>
@@ -229,7 +286,7 @@ foreach ($bills as $bill) {
             </thead>
             <tbody>
                 <?php if (empty($bills)): ?>
-                <tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-muted);">
+                <tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-muted);">
                     <i class="fa-solid fa-check-circle" style="font-size:2rem;color:#27ae60;margin-bottom:8px;display:block;"></i>
                     No records found.
                 </td></tr>
@@ -253,7 +310,15 @@ foreach ($bills as $bill) {
                         <div style="font-weight:700;"><?= htmlspecialchars($b['customer_name']) ?></div>
                         <div style="font-size:0.75rem;color:var(--text-muted);"><?= htmlspecialchars($b['customer_email']) ?></div>
                     </td>
-                    <td style="font-size:0.88rem;"><?= htmlspecialchars($b['package_name']) ?></td>
+                    <td style="font-size:0.88rem;">
+                        <div style="font-weight:600;"><?= htmlspecialchars($b['package_name']) ?></div>
+                        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px;">
+                            <i class="fa-solid fa-users"></i> <?= (int)($b['guest_count'] ?? 1) ?> guests
+                            <?php if ((float)($b['excess_guest_fee'] ?? 0) > 0): ?>
+                                <span style="color:#f5a623;font-weight:700;">(+<?= (int)$b['excess_guests'] ?> extra)</span>
+                            <?php endif; ?>
+                        </div>
+                    </td>
                     <td style="font-size:0.85rem;color:var(--text-secondary);">
                         <?= $b['event_date'] ? date('M d, Y', strtotime($b['event_date'])) : '—' ?>
                     </td>
@@ -276,6 +341,11 @@ foreach ($bills as $bill) {
                     </td>
                     <td>
                         <div style="font-weight:700;font-size:0.92rem;"><?= formatCurrency($b['total_amount']) ?></div>
+                        <?php if ((float)($b['excess_guest_fee'] ?? 0) > 0): ?>
+                            <div style="font-size:0.7rem;color:#f5a623;margin-top:2px;" title="<?= (int)$b['excess_guests'] ?> extra guests @ ₱<?= number_format((float)($b['per_guest_fee'] ?? 75), 2) ?>">
+                                <i class="fa-solid fa-user-plus"></i> +<?= formatCurrency($b['excess_guest_fee']) ?> excess
+                            </div>
+                        <?php endif; ?>
                         <?php if (!empty($b['payment_plan'])): ?>
                             <div style="margin-top:3px;">
                                 <span class="badge" style="font-size:0.68rem;padding:2px 6px;background:<?= $b['payment_plan'] === 'full' ? 'rgba(46,204,113,0.15)' : 'rgba(78,205,196,0.15)' ?>;color:<?= $b['payment_plan'] === 'full' ? '#2ecc71' : 'var(--accent-teal)' ?>;border:1px solid <?= $b['payment_plan'] === 'full' ? 'rgba(46,204,113,0.35)' : 'rgba(78,205,196,0.35)' ?>;font-weight:600;">
@@ -287,6 +357,30 @@ foreach ($bills as $bill) {
                             <div style="font-size:0.7rem;color:#2ecc71;margin-top:2px;">
                                 <i class="fa-solid fa-tag"></i> -<?= formatCurrency($b['discount_amount']) ?>
                             </div>
+                        <?php endif; ?>
+                    </td>
+                    <?php
+                    // Security Deposit column
+                    $dep       = (float)$b['security_deposit'];
+                    $depStatus = $b['deposit_status'] ?? 'held';
+                    $depColors = ['held'=>'#f5a623','returned'=>'#27ae60','forfeited'=>'#e94560'];
+                    $depLabels = ['held'=>'Held','returned'=>'Returned','forfeited'=>'Forfeited'];
+                    $depIcons  = ['held'=>'fa-lock','returned'=>'fa-rotate-left','forfeited'=>'fa-ban'];
+                    $dc = $depColors[$depStatus] ?? '#aaa';
+                    $dl = $depLabels[$depStatus] ?? ucfirst($depStatus);
+                    $di = $depIcons[$depStatus]  ?? 'fa-circle';
+                    ?>
+                    <td>
+                        <?php if ($dep > 0): ?>
+                            <div style="font-weight:700;color:#a78bfa;"><?= formatCurrency($dep) ?></div>
+                            <span style="display:inline-flex;align-items:center;gap:4px;background:<?= $dc ?>18;color:<?= $dc ?>;border:1px solid <?= $dc ?>44;padding:2px 8px;border-radius:20px;font-size:0.7rem;font-weight:700;margin-top:4px;">
+                                <i class="fa-solid <?= $di ?>"></i> <?= $dl ?>
+                            </span>
+                            <?php if (!empty($b['deposit_returned_at'])): ?>
+                                <div style="font-size:0.7rem;color:var(--text-muted);margin-top:3px;"><?= date('M d, Y', strtotime($b['deposit_returned_at'])) ?></div>
+                            <?php endif; ?>
+                        <?php else: ?>
+                            <span style="color:var(--text-muted);font-size:0.82rem;">—</span>
                         <?php endif; ?>
                     </td>
                     <td style="color:#27ae60;font-weight:700;"><?= formatCurrency($b['total_paid']) ?></td>
@@ -318,15 +412,20 @@ foreach ($bills as $bill) {
                     <td>
                         <div style="display:flex;gap:6px;align-items:center;flex-wrap:nowrap;">
                             <?php if ($b['booking_status'] === 'Pending'): ?>
-                                <form method="POST" style="display:inline;margin:0;">
-                                    <input type="hidden" name="action" value="approve_booking">
-                                    <input type="hidden" name="booking_id" value="<?= $b['booking_id'] ?>">
-                                    <button type="submit" class="btn btn-warning btn-sm" style="white-space:nowrap;font-weight:700;padding:5px 10px;"
-                                            onclick="return confirm('Approve booking <?= htmlspecialchars(addslashes(getBookingRef($b))) ?> for <?= htmlspecialchars(addslashes($b['customer_name'])) ?>?')"
-                                            title="Approve booking to enable payment collection">
-                                        <i class="fa-solid fa-check"></i> Approve
-                                    </button>
-                                </form>
+                                <?php if ((int)($b['pending_submissions_count'] ?? 0) > 0): ?>
+                                    <a href="<?= APP_URL ?>/staff/payment_submissions.php" class="btn btn-warning btn-sm" style="white-space:nowrap;font-weight:700;" title="Customer uploaded online payment proof. Review and approve here.">
+                                        <i class="fa-solid fa-hourglass-half"></i> Review Proof
+                                    </a>
+                                <?php endif; ?>
+                                <button type="button" class="btn btn-success btn-sm"
+                                        onclick="openPayModal(<?= $b['booking_id'] ?>, '<?= htmlspecialchars(addslashes($b['customer_name'])) ?>', <?= abs($balance) ?>)"
+                                        title="Collect walk-in payment and approve booking" style="white-space:nowrap;">
+                                    <i class="fa-solid fa-peso-sign"></i> Collect &amp; Approve
+                                </button>
+                                <a href="<?= APP_URL ?>/staff/process_payment.php?id=<?= $b['booking_id'] ?>"
+                                   class="btn btn-primary btn-sm" title="Detailed Payment & Receipts">
+                                    <i class="fa-solid fa-file-invoice"></i>
+                                </a>
                             <?php elseif (!$isPaid && $b['booking_status'] !== 'Cancelled'): ?>
                                 <button type="button" class="btn btn-success btn-sm"
                                         onclick="openPayModal(<?= $b['booking_id'] ?>, '<?= htmlspecialchars(addslashes($b['customer_name'])) ?>', <?= abs($balance) ?>, '<?= !empty($b['approved_at']) ? 'Approved on ' . date('M d, Y g:i A', strtotime($b['approved_at'])) : '' ?>')"
@@ -347,12 +446,83 @@ foreach ($bills as $bill) {
                             <?php if ($isPaid && empty($b['latest_payment_id'])): ?>
                                 <span class="badge badge-success"><i class="fa-solid fa-check"></i> Fully Paid</span>
                             <?php endif; ?>
+                            <?php
+                            // Show deposit action button if deposit is held and booking is not Cancelled
+                            $dep2 = (float)$b['security_deposit'];
+                            $depSt2 = $b['deposit_status'] ?? 'held';
+                            if ($dep2 > 0 && $depSt2 === 'held' && $b['booking_status'] !== 'Cancelled'):
+                            ?>
+                                <button type="button" class="btn btn-sm" style="background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.4);white-space:nowrap;"
+                                        onclick="openDepositModal(<?= $b['booking_id'] ?>, '<?= htmlspecialchars(addslashes($b['customer_name'])) ?>', <?= $dep2 ?>)"
+                                        title="Process security deposit return (no damage) or forfeiture">
+                                    <i class="fa-solid fa-shield-halved"></i> Return/Forfeit Deposit
+                                </button>
+                            <?php endif; ?>
                         </div>
                     </td>
                 </tr>
                 <?php endforeach; ?>
             </tbody>
         </table>
+    </div>
+</div>
+
+<!-- Security Deposit Modal -->
+<div class="modal-overlay" id="depositModal">
+    <div class="modal" style="max-width:460px;">
+        <div class="modal-header" style="background:linear-gradient(135deg,rgba(167,139,250,0.15),rgba(168,85,247,0.08));">
+            <h2 class="modal-title"><i class="fa-solid fa-shield-halved" style="color:#a78bfa;"></i> Security Deposit</h2>
+            <button class="modal-close" onclick="closeDepositModal()">&times;</button>
+        </div>
+        <form method="POST">
+            <input type="hidden" name="action" value="update_deposit">
+            <input type="hidden" name="booking_id" id="depBookingId">
+            <div class="modal-body">
+                <div style="background:rgba(167,139,250,0.08);border:1px solid rgba(167,139,250,0.25);border-radius:12px;padding:14px 18px;margin-bottom:18px;">
+                    <div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:4px;">Customer</div>
+                    <div style="font-weight:700;color:#fff;" id="depCustomerName"></div>
+                    <div style="margin-top:10px;display:flex;align-items:center;gap:10px;">
+                        <span style="font-size:0.82rem;color:var(--text-muted);">Security Deposit Amount:</span>
+                        <span style="font-family:'Outfit',sans-serif;font-size:1.3rem;font-weight:800;color:#a78bfa;" id="depAmount"></span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Deposit Decision <span style="color:var(--accent-red);">*</span></label>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                        <label style="display:flex;align-items:flex-start;gap:10px;background:rgba(39,174,96,0.08);border:2px solid rgba(39,174,96,0.25);border-radius:12px;padding:14px;cursor:pointer;transition:border-color 0.2s;" id="depReturnCard">
+                            <input type="radio" name="deposit_action" value="returned" required onchange="updateDepCard()" style="margin-top:2px;accent-color:#27ae60;">
+                            <div>
+                                <div style="font-weight:700;color:#27ae60;font-size:0.9rem;"><i class="fa-solid fa-rotate-left"></i> Return Deposit</div>
+                                <div style="font-size:0.75rem;color:var(--text-muted);margin-top:3px;">No damage — full deposit returned to customer</div>
+                            </div>
+                        </label>
+                        <label style="display:flex;align-items:flex-start;gap:10px;background:rgba(233,69,96,0.08);border:2px solid rgba(233,69,96,0.25);border-radius:12px;padding:14px;cursor:pointer;transition:border-color 0.2s;" id="depForfeitCard">
+                            <input type="radio" name="deposit_action" value="forfeited" onchange="updateDepCard()" style="margin-top:2px;accent-color:#e94560;">
+                            <div>
+                                <div style="font-weight:700;color:#e94560;font-size:0.9rem;"><i class="fa-solid fa-ban"></i> Forfeit Deposit</div>
+                                <div style="font-size:0.75rem;color:var(--text-muted);margin-top:3px;">Damage occurred — deposit is forfeited</div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="deposit_note">Note / Reason <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+                    <textarea id="deposit_note" name="deposit_note" class="form-control" rows="2"
+                              placeholder="e.g. No damage found, full deposit returned to customer."></textarea>
+                </div>
+
+                <div style="background:rgba(245,166,35,0.08);border:1px solid rgba(245,166,35,0.25);border-radius:8px;padding:10px 14px;font-size:0.8rem;color:var(--text-secondary);">
+                    <i class="fa-solid fa-circle-info" style="color:#f5a623;"></i>
+                    This action is <strong>permanent</strong> and will be logged in the audit trail. Verify the venue condition before proceeding.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeDepositModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="depSubmitBtn"><i class="fa-solid fa-check"></i> Confirm</button>
+            </div>
+        </form>
     </div>
 </div>
 
@@ -375,14 +545,14 @@ foreach ($bills as $bill) {
                     Recording payment for: <strong id="payCustomerName" style="color:#fff;"></strong>
                 </p>
                 <div class="form-group">
-                    <label class="form-label">Amount to Pay (₱) <span style="color:var(--accent-red);">*</span></label>
+                    <label class="form-label">Amount to Pay (&#8369;) <span style="color:var(--accent-red);">*</span></label>
                     <input type="number" name="amount" id="payAmount" class="form-control" step="any" min="0.01" required>
                     <div class="form-hint" id="payBalanceHint"></div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Payment Method</label>
                     <select name="payment_method" class="form-control" style="background:rgba(39,174,96,0.1);border-color:rgba(39,174,96,0.4);color:#27ae60;font-weight:700;">
-                        <option value="cash" selected>💵 Cash (Walk-in Only)</option>
+                        <option value="cash" selected>&#128181; Cash (Walk-in Only)</option>
                     </select>
                     <div class="form-hint" style="color:var(--text-muted);font-size:0.78rem;margin-top:5px;">
                         <i class="fa-solid fa-person-walking"></i> Walk-in cash transactions only. Payments must be received in cash at the counter.
@@ -398,23 +568,47 @@ foreach ($bills as $bill) {
 </div>
 
 <script>
+// ── Deposit Modal ────────────────────────────────────────────
+function openDepositModal(bookingId, customerName, amount) {
+    document.getElementById('depBookingId').value = bookingId;
+    document.getElementById('depCustomerName').textContent = customerName;
+    document.getElementById('depAmount').textContent = '\u20b1' + parseFloat(amount).toLocaleString('en-PH', {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.querySelectorAll('#depositModal input[name="deposit_action"]').forEach(r => r.checked = false);
+    document.getElementById('deposit_note').value = '';
+    document.getElementById('depositModal').classList.add('open');
+    document.body.style.overflow = 'hidden';
+}
+function closeDepositModal() {
+    document.getElementById('depositModal').classList.remove('open');
+    document.body.style.overflow = '';
+}
+function updateDepCard() {
+    const ret = document.querySelector('input[name="deposit_action"][value="returned"]').checked;
+    const forf = document.querySelector('input[name="deposit_action"][value="forfeited"]').checked;
+    document.getElementById('depReturnCard').style.borderColor  = ret  ? '#27ae60' : 'rgba(39,174,96,0.25)';
+    document.getElementById('depForfeitCard').style.borderColor = forf ? '#e94560' : 'rgba(233,69,96,0.25)';
+    const btn = document.getElementById('depSubmitBtn');
+    if (ret) { btn.style.background='#27ae60'; btn.innerHTML='<i class="fa-solid fa-rotate-left"></i> Return Deposit'; }
+    else if (forf) { btn.style.background='#e94560'; btn.innerHTML='<i class="fa-solid fa-ban"></i> Forfeit Deposit'; }
+}
+document.getElementById('depositModal').addEventListener('click', function(e) {
+    if (e.target === this) closeDepositModal();
+});
+
+// ── Pay Modal ─────────────────────────────────────────────────
 function openPayModal(bookingId, customerName, balance, approvedText = '') {
     const balVal = parseFloat(balance);
     document.getElementById('payBookingId').value   = bookingId;
     document.getElementById('payCustomerName').textContent = customerName;
     document.getElementById('payAmount').value      = balVal.toFixed(2);
     document.getElementById('payAmount').max        = balVal.toFixed(2);
-    document.getElementById('payBalanceHint').textContent  = 'Outstanding balance: ₱' + balVal.toLocaleString('en-PH', {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('payBalanceHint').textContent  = 'Outstanding balance: \u20b1' + balVal.toLocaleString('en-PH', {minimumFractionDigits:2, maximumFractionDigits:2});
 
     const notice = document.getElementById('payApprovedNotice');
     const noticeTxt = document.getElementById('payApprovedText');
     if (notice && noticeTxt) {
-        if (approvedText) {
-            noticeTxt.textContent = approvedText;
-            notice.style.display = 'flex';
-        } else {
-            notice.style.display = 'none';
-        }
+        if (approvedText) { noticeTxt.textContent = approvedText; notice.style.display = 'flex'; }
+        else { notice.style.display = 'none'; }
     }
 
     const m = document.getElementById('quickPayModal');

@@ -4,6 +4,7 @@ require_once __DIR__ . '/../includes/header.php';
 requireRole(['staff', 'cashier']);
 
 $db     = getDB();
+ensureExcessGuestColumns($db);
 $user   = getCurrentUser();
 $userId = (int)($user['user_id'] ?? $user['id'] ?? 0);
 
@@ -89,6 +90,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         WHERE submission_id = ?
                     ")->execute([$userId, $paymentId, $subId]);
 
+                    // Auto-approve booking if pending now that payment has been verified
+                    ensureApprovalColumns($db);
+                    $db->prepare("UPDATE bookings SET status = 'Confirmed', approved_at = NOW(), approved_by = ? WHERE booking_id = ? AND status = 'Pending'")
+                       ->execute([$userId, $submission['booking_id']]);
+
                     // Update booking payment status
                     updateBookingPaymentStatus($submission['booking_id']);
 
@@ -168,7 +174,7 @@ if ($search) {
 
 $submissionsStmt = $db->prepare("
     SELECT ps.*, u.name AS customer_name, u.email AS customer_email,
-           b.booking_reference, b.event_date, b.total_amount, p.package_name,
+           b.booking_reference, b.event_date, b.total_amount, b.guest_count, b.excess_guests, b.excess_guest_fee, p.package_name,
            rev.name AS reviewer_name
     FROM payment_submissions ps
     JOIN users u ON ps.customer_id = u.user_id
@@ -254,6 +260,7 @@ require_once __DIR__ . '/../includes/navbar.php';
 
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;font-size:0.83rem;color:var(--text-secondary);margin-bottom:10px;">
                 <div>📦 <strong style="color:#fff;"><?= htmlspecialchars($sub['package_name']) ?></strong></div>
+                <div>👥 Guests: <strong style="color:#fff;"><?= (int)($sub['guest_count'] ?? 1) ?><?php if ((float)($sub['excess_guest_fee'] ?? 0) > 0): ?> <span style="color:#f39c12;font-size:0.75rem;">(+<?= (int)$sub['excess_guests'] ?> excess: ₱<?= number_format((float)$sub['excess_guest_fee'], 0) ?>)</span><?php endif; ?></strong></div>
                 <div>📅 Event: <strong style="color:#fff;"><?= formatDate($sub['event_date']) ?></strong></div>
                 <div>💰 Submitted: <strong style="color:var(--accent-gold);">₱<?= number_format($sub['amount'], 2) ?></strong></div>
                 <div>💳 Method: <strong style="color:#fff;"><?= htmlspecialchars(ucwords(str_replace('_',' ',$sub['payment_method']))) ?></strong></div>
